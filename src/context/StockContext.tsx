@@ -25,8 +25,9 @@ interface StockContextType {
   /** Static catalog number overridden by live stock when known. */
   stockFor: (product: Product) => number;
   /**
-   * True when an SMS product has no pre-bought stock but the on-demand
-   * provider can still supply it, so it stays purchasable.
+   * True when a product has no usable pre-bought stock but an on-demand
+   * provider can still supply it — an SMS number or a proxy batch — so it stays
+   * purchasable rather than showing Out of Stock.
    */
   isDynamic: (product: Product) => boolean;
   /** Purchasable at all: in stock, or fulfilable on demand. */
@@ -52,7 +53,8 @@ export function StockProvider({ children }: { children: ReactNode }) {
       .then((res) => {
         if (cancelled || !res.ok || !res.data) return;
         setCounts(res.data.counts ?? {});
-        // SMS products with no static stock that the provider can still supply.
+        // Products with no usable static stock that a provider can still
+        // supply, either SMS numbers or proxy addresses.
         setDynamic(res.data.dynamic ?? []);
         setLastUpdated(res.data.generated_at ?? null);
         setLive(true);

@@ -18,6 +18,13 @@ export const SMS_WARNINGS = [
   "KEEP THE INBOX PAGE OPEN WHILE YOU WAIT FOR THE CODE",
 ] as const;
 
+/** Extra guidance shown for orders that include proxy addresses. */
+export const PROXY_WARNINGS = [
+  "ADD THE ADDRESSES TO YOUR PROXY TOOL ONE PER LINE",
+  "THE POOL IS SHARED — AN ADDRESS MAY BE REASSIGNED LATER",
+  "DO NOT SEND SENSITIVE LOGINS THROUGH AN UNVERIFIED ADDRESS",
+] as const;
+
 /**
  * Builds the downloadable `.txt` for an order.
  *
@@ -58,6 +65,19 @@ export function buildOrderText(
         current = cred.product_name;
       }
 
+      if (cred.kind === "proxy") {
+        const proxies = cred.proxies ?? [];
+        out.push(`Proxies (${proxies.length}):`);
+        for (const address of proxies) {
+          out.push(`  ${address}`);
+        }
+        if (cred.proxy_country) out.push(`Country: ${cred.proxy_country}`);
+        if (cred.proxy_protocol) out.push(`Protocol: ${cred.proxy_protocol}`);
+        if (cred.notes) out.push(`Notes:   ${cred.notes}`);
+        out.push("");
+        continue;
+      }
+
       if (cred.kind === "sms") {
         out.push(`Number:  ${cred.phone_number ?? cred.uid}`);
         if (cred.inbox_url) out.push(`Inbox:   ${cred.inbox_url}`);
@@ -75,6 +95,14 @@ export function buildOrderText(
   if (credentials.some((c) => c.kind === "sms")) {
     out.push("SMS NUMBERS");
     for (const warning of SMS_WARNINGS) {
+      out.push(`- ${warning}`);
+    }
+    out.push("");
+  }
+
+  if (credentials.some((c) => c.kind === "proxy")) {
+    out.push("PROXIES");
+    for (const warning of PROXY_WARNINGS) {
       out.push(`- ${warning}`);
     }
     out.push("");
@@ -132,9 +160,23 @@ export async function copyText(value: string): Promise<boolean> {
   }
 }
 
-/** All credentials as one copyable block. */
+/**
+ * All credentials as one copyable block.
+ *
+ * Proxies expand to their address list rather than a single UID line, so
+ * pasting the whole order into a proxy tool still works.
+ */
 export function allCredentialsText(credentials: DeliveredCredential[]): string {
   return credentials
-    .map((c) => `${c.uid} | ${c.account_data}`)
+    .map((c) => {
+      if (c.kind === "proxy") {
+        return (c.proxies ?? []).join("\n");
+      }
+      if (c.kind === "sms") {
+        return c.phone_number ?? c.uid;
+      }
+      return `${c.uid} | ${c.account_data}`;
+    })
+    .filter((block) => block.trim() !== "")
     .join("\n");
 }

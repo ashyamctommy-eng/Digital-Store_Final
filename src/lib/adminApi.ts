@@ -137,6 +137,84 @@ export function adminSmsotpStatus(): Promise<ApiResult<SmsotpStatusResponse>> {
   return adminFetch("/admin/smsotp-status", { method: "GET" });
 }
 
+/* ------------------------------- nextproxy ------------------------------ */
+
+/**
+ * Live status of the on-demand proxy supply.
+ *
+ * Note what `credits_*` means here: the provider documents a credit balance and
+ * a developer console to recharge it, but the live service exposes neither — its
+ * `/api/profile` and `/api/credits` routes return 404, and the documented
+ * `X-Credits-Remaining` header is never sent. What it really returns is a
+ * rate-limit window, so `rate_remaining` is the number that reflects reality and
+ * `credits_remaining` stays null unless a real credits source exists.
+ */
+export interface NextProxyStatus {
+  ok: boolean;
+  enabled: boolean;
+  reachable: boolean;
+  key_present: boolean;
+  key_masked: string;
+  key_source: "settings" | "config" | "env" | "none";
+  base: string;
+  path: string;
+  auth_style: string;
+  tier: string | null;
+  pool_total: number | null;
+  rate_limit: number | null;
+  rate_remaining: number | null;
+  rate_reset: number | null;
+  credits_remaining: number | null;
+  credits_used: number | null;
+  credits_source: string | null;
+  /** A few real addresses, so the admin can see what a buyer would receive. */
+  sample: string[];
+  error: string | null;
+  checked_at: string;
+  cached?: boolean;
+}
+
+export interface NextProxyStatusResponse {
+  status: NextProxyStatus;
+  products: {
+    product_id: string;
+    label: string;
+    country: string;
+    protocol: string;
+    per_unit: number;
+  }[];
+  credits_source: string | null;
+  rate_limit_source: string | null;
+  profile_configured: boolean;
+}
+
+export interface NextProxyKeyResponse {
+  saved: boolean;
+  key_present: boolean;
+  key_masked: string;
+  key_source: string;
+  status: NextProxyStatus;
+}
+
+/** Proxy provider status. Pass refresh to bypass the server-side cache. */
+export function adminNextProxyStatus(
+  refresh = false
+): Promise<ApiResult<NextProxyStatusResponse>> {
+  return adminFetch(`/admin/nextproxy-status${refresh ? "?refresh=1" : ""}`, {
+    method: "GET",
+  });
+}
+
+/** Stores or clears the proxy provider key. Empty string clears it. */
+export function adminSaveNextProxyKey(
+  apiKey: string
+): Promise<ApiResult<NextProxyKeyResponse>> {
+  return adminFetch("/admin/nextproxy-key", {
+    method: "POST",
+    body: JSON.stringify({ apiKey }),
+  });
+}
+
 export function adminDeleteUnit(
   productId: string,
   unitId: string
@@ -174,9 +252,59 @@ function normalizePhone(value: string): string {
   return digits ? `+${digits}` : "";
 }
 
+/**
+ * Validates "IP:PORT" the way the backend does.
+ *
+ * Kept intentionally close to `proxy_public_ip()` /
+ * `proxy_normalize_address()` in server/api/lib/proxyaddr.php: private,
+ * loopback, link-local, carrier-NAT and documentation ranges are all refused,
+ * because those addresses cannot route for a buyer.
+ */
+const UNROUTABLE_V4 =
+  /^(?:0\.|10\.|100\.(?:6[4-9]|[7-9]\d|1[0-2]\d)\.|127\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|192\.0\.0\.|192\.0\.2\.|192\.168\.|198\.1[89]\.|198\.51\.100\.|203\.0\.113\.|22[4-9]\.|23\d\.|24\d\.|25[0-5]\.)/;
+
+function isPublicAddress(host: string): boolean {
+  if (!host) return false;
+  // IPv6: bracketed, or containing a colon.
+  const bare = host.replace(/^\[|\]$/g, "");
+  if (bare.includes(":")) {
+    return /^[0-9a-f:]+$/i.test(bare);
+  }
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(bare)) return false;
+  if (bare.split(".").some((part) => Number(part) > 255)) return false;
+  return !UNROUTABLE_V4.test(bare);
+}
+
+function normalizeProxyAddress(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  let host = "";
+  let port = "";
+  const bracketed = trimmed.match(/^(\[[0-9a-fA-F:]+\]):(\d{1,5})$/);
+  if (bracketed) {
+    host = bracketed[1];
+    port = bracketed[2];
+  } else {
+    const at = trimmed.lastIndexOf(":");
+    if (at === -1) return "";
+    host = trimmed.slice(0, at);
+    port = trimmed.slice(at + 1);
+  }
+
+  const portNumber = Number(port.trim());
+  if (!/^\d{1,5}$/.test(port.trim()) || portNumber < 1 || portNumber > 65535) {
+    return "";
+  }
+  if (!isPublicAddress(host.trim())) return "";
+
+  const bare = host.trim().replace(/^\[|\]$/g, "");
+  return bare.includes(":") ? `[${bare}]:${portNumber}` : `${bare}:${portNumber}`;
+}
+
 export function parseCredentialLines(
   text: string,
-  kind: "credentials" | "sms" = "credentials"
+  kind: "credentials" | "sms" | "proxy" = "credentials"
 ): ParsedLine[] {
   const seen = new Set<string>();
   const out: ParsedLine[] = [];
@@ -194,6 +322,23 @@ export function parseCredentialLines(
       fields = [line];
     } else if ((line.match(/:/g)?.length ?? 0) >= 2 && !line.includes(" ")) {
       fields = line.split(":").map((f) => f.trim());
+    }
+
+    if (kind === "proxy") {
+      // Mirrors proxy_normalize_address() on the server: an address without a
+      // routable public IP and a real port is refused rather than stored.
+      const rawAddress = line.includes("|") ? fields[0] : line;
+      const address = normalizeProxyAddress(rawAddress);
+      if (!address) continue;
+      const extra = line.includes("|") ? fields[1] ?? "" : "";
+      out.push({
+        uid: address,
+        secret: line,
+        fields,
+        notes: extra || undefined,
+        wellFormed: true,
+      });
+      continue;
     }
 
     if (kind === "sms") {

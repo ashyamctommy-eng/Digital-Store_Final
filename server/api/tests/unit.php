@@ -20,6 +20,9 @@ require_once __DIR__ . '/../lib/nowpayments.php';
 require_once __DIR__ . '/../lib/palplus.php';
 require_once __DIR__ . '/../lib/catalog.php';
 require_once __DIR__ . '/../lib/smsotp.php';
+require_once __DIR__ . '/../lib/nextproxy.php';
+require_once __DIR__ . '/../lib/proxyaddr.php';
+require_once __DIR__ . '/../lib/settings.php';
 
 $GLOBALS['__pass'] = 0;
 $GLOBALS['__fail'] = 0;
@@ -370,6 +373,336 @@ ok(hash_equals($expectedKey, 'test-admin-key'), 'correct admin key matches');
 ok(!hash_equals($expectedKey, 'wrong-key'), 'wrong admin key does not match');
 ok(!hash_equals($expectedKey, ''), 'empty admin key does not match');
 
+/* ---------------------------------------------------------------- */
+section('Proxy address validation');
+
+// A proxy list is an attack surface and a support cost: handing a buyer an
+// address that cannot route is worse than handing them nothing.
+ok(proxy_public_ip('8.8.8.8'), 'a routable address is accepted');
+ok(proxy_public_ip('203.0.9.1'), 'an ordinary public address is accepted');
+ok(!proxy_public_ip('10.0.0.1'), 'private space is rejected');
+ok(!proxy_public_ip('172.16.0.1'), 'private space (172.16/12) is rejected');
+ok(!proxy_public_ip('192.168.1.1'), 'private space (192.168/16) is rejected');
+ok(!proxy_public_ip('127.0.0.1'), 'loopback is rejected');
+ok(!proxy_public_ip('169.254.1.1'), 'link-local is rejected');
+ok(!proxy_public_ip('0.1.2.3'), 'the 0/8 block is rejected');
+ok(!proxy_public_ip('100.64.0.1'), 'carrier-grade NAT is rejected');
+ok(!proxy_public_ip('192.0.2.5'), 'the TEST-NET-1 documentation range is rejected');
+ok(!proxy_public_ip('198.51.100.5'), 'the TEST-NET-2 documentation range is rejected');
+ok(!proxy_public_ip('203.0.113.5'), 'the TEST-NET-3 documentation range is rejected');
+ok(!proxy_public_ip('224.0.0.1'), 'multicast is rejected');
+ok(!proxy_public_ip('255.255.255.255'), 'the broadcast address is rejected');
+ok(!proxy_public_ip(''), 'an empty address is rejected');
+ok(!proxy_public_ip('not-an-ip'), 'nonsense is rejected');
+ok(proxy_public_ip('2001:4860:4860::8888'), 'a public IPv6 address is accepted');
+
+eq('', proxy_port('0'), 'port 0 is rejected');
+eq('', proxy_port('65536'), 'an out-of-range port is rejected');
+eq('', proxy_port(''), 'an empty port is rejected');
+eq('8080', proxy_port('8080'), 'a normal port is accepted');
+eq('8080', proxy_port(' 8080 '), 'a padded port is trimmed');
+eq('', proxy_port('abc'), 'a non-numeric port is rejected');
+
+eq('1.2.3.4:8080', proxy_format_pair('1.2.3.4', '8080'), 'a pair formats as IP:PORT');
+eq('1.2.3.4:8080', proxy_format_pair('1.2.3.4', 8080), 'a numeric port is accepted');
+eq('', proxy_format_pair('10.0.0.1', '8080'), 'a private pair does not format');
+eq('[2001:4860:4860::8888]:8080', proxy_format_pair('2001:4860:4860::8888', '8080'), 'IPv6 is bracketed so IP:PORT stays unambiguous');
+
+eq('1.2.3.4:8080', proxy_normalize_address('1.2.3.4:8080'), 'an address normalises');
+eq('1.2.3.4:8080', proxy_normalize_address('  1.2.3.4:8080  '), 'whitespace is tolerated');
+eq('', proxy_normalize_address('1.2.3.4'), 'an address with no port is rejected');
+eq('', proxy_normalize_address('10.0.0.1:8080'), 'a private address is rejected');
+eq('', proxy_normalize_address(''), 'an empty address is rejected');
+
+/* ---------------------------------------------------------------- */
+section('Proxy payload parsing');
+
+eq(
+    ['1.2.3.4:8080'],
+    proxy_unique([['ip' => '1.2.3.4', 'port' => '8080']]),
+    'the documented ip/port shape parses'
+);
+eq(
+    ['1.2.3.4:8080'],
+    proxy_unique([['ip' => '1.2.3.4', 'port' => 8080]]),
+    'a numeric port parses'
+);
+eq(
+    ['1.2.3.4:8080'],
+    proxy_unique(['1.2.3.4:8080']),
+    'an already-formatted string parses'
+);
+eq(
+    ['1.2.3.4:8080'],
+    proxy_unique([['host' => '1.2.3.4', 'port' => '8080']]),
+    'the host/port variant parses'
+);
+eq(
+    ['1.2.3.4:8080'],
+    proxy_unique([['proxy' => ['ip' => '1.2.3.4', 'port' => '8080']]]),
+    'a nested wrapper parses'
+);
+eq(
+    ['1.2.3.4:8080'],
+    proxy_unique([['ip' => '1.2.3.4:8080']]),
+    'ip:port packed into one field parses'
+);
+eq(
+    ['1.2.3.4:8080'],
+    proxy_unique([
+        ['ip' => '1.2.3.4', 'port' => '8080'],
+        ['ip' => '1.2.3.4', 'port' => '8080'],
+    ]),
+    'duplicates are collapsed'
+);
+eq(
+    ['1.2.3.4:8080', '5.6.7.8:3128'],
+    proxy_unique([
+        ['ip' => '1.2.3.4', 'port' => '8080'],
+        ['ip' => '10.0.0.1', 'port' => '8080'],
+        ['ip' => '5.6.7.8', 'port' => '3128'],
+        ['ip' => 'nonsense', 'port' => 'x'],
+    ]),
+    'unusable rows are dropped without losing the good ones'
+);
+
+eq(
+    ['1.2.3.4:8080'],
+    nextproxy_parse_proxies(['status' => 'success', 'proxies' => [['ip' => '1.2.3.4', 'port' => '8080']]]),
+    'the documented response shape parses'
+);
+eq(
+    ['1.2.3.4:8080'],
+    nextproxy_parse_proxies(['data' => ['proxies' => [['ip' => '1.2.3.4', 'port' => '8080']]]]),
+    'a nested data.proxies wrapper parses'
+);
+eq(
+    ['1.2.3.4:8080'],
+    nextproxy_parse_proxies(['list' => [['ip' => '1.2.3.4', 'port' => '8080']]]),
+    'a list wrapper parses'
+);
+eq(
+    ['1.2.3.4:8080'],
+    nextproxy_parse_proxies(['data' => [['ip' => '1.2.3.4', 'port' => '8080']]]),
+    'a bare data array parses'
+);
+eq([], nextproxy_parse_proxies(['status' => 'success']), 'a body with no list yields nothing');
+eq(
+    [],
+    nextproxy_parse_proxies(['proxies' => [['ip' => '1.2.3.4', 'port' => '8080', 'masked' => true]]]),
+    'a masked row is not delivered'
+);
+eq(
+    [],
+    nextproxy_parse_proxies(['proxies' => [['ip' => '1.2.3.4', 'port' => '8080', 'isLocked' => true]]]),
+    'a locked row is not delivered'
+);
+
+/* ---------------------------------------------------------------- */
+section('Proxy provider envelope handling');
+
+eq(
+    60,
+    nextproxy_meta_from_response(['headers' => ['x-ratelimit-limit' => '60']])['rate_limit'],
+    'the rate limit is read from headers'
+);
+eq(
+    48,
+    nextproxy_meta_from_response(['headers' => ['x-ratelimit-remaining' => '48']])['rate_remaining'],
+    'the remaining quota is read from headers'
+);
+eq(
+    null,
+    nextproxy_meta_from_response(['headers' => []])['credits_remaining'],
+    'no credit header means no credit figure is invented'
+);
+eq(
+    1000,
+    nextproxy_meta_from_response(['headers' => ['x-credits-remaining' => '1000']])['credits_remaining'],
+    'the documented credit header is used when the provider sends it'
+);
+eq(
+    'Guest Community Tier (60 req/min)',
+    nextproxy_meta_from_response(['body' => ['clientTier' => 'Guest Community Tier (60 req/min)']])['tier'],
+    'the account tier is read from the body'
+);
+eq(
+    82220,
+    nextproxy_meta_from_response(['body' => ['total' => 82220]])['pool_total'],
+    'the pool size is read from the body'
+);
+eq(
+    8733,
+    nextproxy_meta_from_response(['body' => ['totalMatching' => 8733]])['pool_total'],
+    'the pool size falls back to totalMatching'
+);
+eq(
+    null,
+    nextproxy_meta_from_response([])['rate_limit'],
+    'an empty response reports no quota rather than zero'
+);
+
+// A key is optional for this provider: its pool is public. Requiring one would
+// report a working integration as broken.
+ok(
+    nextproxy_is_configured(['nextproxy' => ['enabled' => true, 'api_base' => 'https://x.test']]),
+    'the provider counts as configured without an API key'
+);
+ok(
+    !nextproxy_is_configured(['nextproxy' => ['enabled' => false, 'api_base' => 'https://x.test']]),
+    'the off switch disables it'
+);
+eq(
+    'https://console.nextproxy.site',
+    nextproxy_base([]),
+    'the base URL defaults to the console host'
+);
+eq('/api/proxies', nextproxy_list_path([]), 'the documented list path is the default');
+eq('header', nextproxy_auth_style([]), 'the key is sent as a header by default');
+eq('query', nextproxy_auth_style(['nextproxy' => ['auth_style' => 'query']]), 'the query auth style is supported');
+eq('header', nextproxy_auth_style(['nextproxy' => ['auth_style' => 'nonsense']]), 'an unknown auth style falls back to the header');
+
+/* ---------------------------------------------------------------- */
+section('Proxy key resolution and masking');
+
+$keyConfig = ['data_dir' => $tmp . '/settings-key'];
+@mkdir($keyConfig['data_dir'], 0777, true);
+
+eq('', nextproxy_api_key($keyConfig), 'no key is present by default');
+eq('none', nextproxy_key_source($keyConfig), 'the source reports none');
+
+// The admin console value wins over config.php, so the owner can rotate a key
+// without touching the server.
+$write = settings_write($keyConfig, ['nextproxy.api_key' => 'nex_live_abcd1234efgh']);
+ok($write['ok'], 'a key can be written from the admin console');
+eq('nex_live_abcd1234efgh', nextproxy_api_key($keyConfig), 'the stored key is used');
+eq('settings', nextproxy_key_source($keyConfig), 'the source reports the admin console');
+
+$fromConfig = ['data_dir' => $keyConfig['data_dir'], 'nextproxy' => ['api_key' => 'config-key-xyz']];
+eq('nex_live_abcd1234efgh', nextproxy_api_key($fromConfig), 'the stored key overrides config.php');
+
+settings_write($keyConfig, ['nextproxy.api_key' => null]);
+eq('config-key-xyz', nextproxy_api_key($fromConfig), 'clearing the stored key falls back to config.php');
+
+// Only allow-listed settings may be written through this path.
+$evil = settings_write($keyConfig, ['admin_api_key' => 'pwned', 'nextproxy.api_key' => 'ok']);
+ok(in_array('admin_api_key', $evil['rejected'], true), 'an unrelated setting is rejected');
+ok(!in_array('admin_api_key', $evil['written'], true), 'and is not reported as written');
+$stored = settings_read($keyConfig);
+ok(!isset($stored['admin_api_key']), 'the unrelated setting is not stored');
+
+eq('nex_••••••efgh', settings_mask_secret('nex_live_abcd1234efgh'), 'a long secret is masked with its ends shown');
+eq('•••••••', settings_mask_secret('bad-key'), 'a short secret is hidden entirely');
+eq('', settings_mask_secret(''), 'an empty secret masks to nothing');
+
+$settingsFile = $keyConfig['data_dir'] . '/settings.json';
+if (is_file($settingsFile)) {
+    eq('0600', substr(sprintf('%o', fileperms($settingsFile)), -4), 'the settings file is owner-only');
+} else {
+    ok(false, 'the settings file exists');
+}
+
+/* ---------------------------------------------------------------- */
+section('Proxy dispatch bookkeeping');
+
+$proxyConfig = ['data_dir' => $tmp . '/proxy-dispatch', 'nextproxy' => ['enabled' => false]];
+@mkdir($proxyConfig['data_dir'], 0777, true);
+
+// With the provider switched off and no stock, the order must fail closed.
+$result = dispatch_claim_proxy($proxyConfig, 'proxy-dc-03', 1, 'ORDER_off_1');
+eq([], $result['units'], 'no provider and no stock delivers nothing');
+eq(1, $result['shortfall'], 'and reports the full shortfall');
+
+// A product that is not a proxy product cannot be proxy-dispatched.
+$missing = dispatch_claim_proxy($proxyConfig, 'vpn-nord-1y', 1, 'ORDER_off_2');
+eq(1, $missing['shortfall'], 'a non-proxy product is refused');
+
+// 7 addresses cannot make a 10-IP unit; they must not be sold as one.
+inventory_add_units($proxyConfig, 'proxy-9p-10', implode("\n", [
+    '203.0.30.1:8080',
+    '203.0.30.2:8080',
+    '203.0.30.3:8080',
+    '203.0.30.4:8080',
+    '203.0.30.5:8080',
+    '203.0.30.6:8080',
+    '203.0.30.7:8080',
+]), 'proxy');
+eq(7, inventory_count_available($proxyConfig, 'proxy-9p-10'), '7 addresses were stocked');
+
+$partial = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 1, 'ORDER_partial_1');
+eq([], $partial['units'], 'a partial unit is not sold');
+eq(7, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'the stranded addresses stay available');
+eq(1, $partial['shortfall'], 'the shortfall is reported');
+
+// 10 addresses is exactly one unit.
+inventory_add_units($proxyConfig, 'proxy-9p-10', implode("\n", [
+    '203.0.31.1:8080', '203.0.31.2:8080', '203.0.31.3:8080', '203.0.31.4:8080',
+    '203.0.31.5:8080', '203.0.31.6:8080', '203.0.31.7:8080', '203.0.31.8:8080',
+    '203.0.31.9:8080', '203.0.31.10:8080',
+]), 'proxy');
+eq(17, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'stock is now 17 addresses');
+
+$whole = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 1, 'ORDER_whole_1');
+eq(1, count($whole['units']), 'a whole unit is delivered');
+eq(0, $whole['shortfall'], 'with no shortfall');
+eq(10, $whole['units'][0]['proxy_count'], 'and exactly 10 addresses');
+eq('static', $whole['units'][0]['source'], 'from pre-bought stock');
+eq(10, count($whole['units'][0]['proxies']), 'the address list carries every address');
+eq(7, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'the next 7 addresses were left untouched');
+
+// Order quantity multiplies the unit, and the addresses must not repeat.
+$two = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 2, 'ORDER_two_1');
+$collected = [];
+foreach ($two['units'] as $unit) {
+    foreach ($unit['proxies'] as $address) {
+        $collected[] = $address;
+    }
+}
+eq(count($collected), count(array_unique($collected)), 'no address is delivered twice across units');
+
+// Regression: a store that never configured the integration must not source
+// addresses from the provider. A default of "on" once let an unconfigured
+// install — and the test suite itself — call the live API.
+ok(!nextproxy_enabled([]), 'on-demand proxy supply is off until it is switched on');
+$unconfigured = ['data_dir' => $tmp . '/proxy-unconfigured'];
+@mkdir($unconfigured['data_dir'], 0777, true);
+$guard = dispatch_claim_proxy($unconfigured, 'proxy-dc-03', 1, 'ORDER_default_1');
+eq([], $guard['units'], 'an unconfigured store sources nothing');
+eq(1, $guard['shortfall'], 'and records the shortfall instead');
+ok(
+    str_contains((string) $guard['dynamic_error'], 'not enabled'),
+    'and explains that the provider is switched off'
+);
+
+/* ---------------------------------------------------------------- */
+section('Proxy stock parsing');
+
+$parsed = inventory_parse_lines("203.0.40.1:8080\n203.0.40.2:8080 | user:pass\n", 'proxy');
+eq(2, count($parsed), 'two proxy lines parse');
+eq('proxy', $parsed[0]['kind'], 'the unit is marked as a proxy');
+eq('203.0.40.1:8080', $parsed[0]['uid'], 'the address becomes the unit uid');
+eq('203.0.40.2:8080', $parsed[1]['uid'], 'an address with credentials still yields the address');
+eq('user:pass', $parsed[1]['notes'], 'the trailing credentials are kept as a note');
+
+$rejected = [];
+inventory_parse_lines("10.0.0.1:8080\nnot-an-address\n203.0.40.9:8080\n", 'proxy', $rejected);
+eq(2, count($rejected), 'unusable proxy lines are reported, not silently dropped');
+eq('10.0.0.1:8080', $rejected[0]['line'], 'the rejected line is identified');
+eq('Not a public IP:PORT address.', $rejected[0]['reason'], 'with a reason');
+
+$colonForm = inventory_parse_lines('203.0.41.1:8080:user:pass', 'proxy');
+eq(1, count($colonForm), 'the colon-separated form parses');
+eq('203.0.41.1:8080', $colonForm[0]['uid'], 'the address is extracted from the colon form');
+
+eq('proxy', catalog_delivery_kind('proxy-9p-10'), 'the catalog knows a proxy product');
+eq(null, catalog_delivery_kind('vpn-nord-1y'), 'and reports nothing for a plain product');
+eq('sms', catalog_delivery_kind('sms-whatsapp'), 'while still knowing SMS products');
+ok(catalog_is_proxy('proxy-dc-03'), 'catalog_is_proxy recognises a proxy product');
+ok(!catalog_is_proxy('sms-whatsapp'), 'and does not confuse the two kinds');
+eq(10, (int) catalog_proxy_spec('proxy-9p-10')['per_unit'], 'the per-unit address count comes from the catalog');
+eq('socks5', catalog_proxy_spec('proxy-mobile-02')['protocol'], 'the protocol filter comes from the catalog');
+
+/* ---------------------------------------------------------------- */
 /* ---------------------------------------------------------------- */
 section('Summary');
 

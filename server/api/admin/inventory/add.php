@@ -33,14 +33,15 @@ if (trim($text) === '') {
     json_error('No credential lines were provided.', 422, 'EMPTY_INPUT');
 }
 
-// SMS products are stocked as `PHONE | INBOX_URL_OR_NOTES`; everything else as
-// credential lines. The kind comes from the generated catalog, so the admin
-// does not have to pick a format.
-$kind = catalog_is_sms($productId) ? 'sms' : 'credentials';
+// The stock format comes from the generated catalog, so the admin does not have
+// to pick one: SMS products take `PHONE | INBOX_URL_OR_NOTES`, proxy products
+// take `IP:PORT`, everything else takes credential lines.
+$kind = catalog_delivery_kind($productId) ?? 'credentials';
 
 // Guard against a pasted novel filling the disk.
 $maxLines = (int) config_value($config, 'max_inventory_lines', 5000);
-$parsed = inventory_parse_lines($text, $kind);
+$rejected = [];
+$parsed = inventory_parse_lines($text, $kind, $rejected);
 if (count($parsed) > $maxLines) {
     json_error(
         'That is ' . count($parsed) . ' lines; the limit per upload is ' . $maxLines . '.',
@@ -63,6 +64,10 @@ foreach ($parsed as $unit) {
         } elseif (inventory_phone_needs_review((string) ($unit['phone'] ?? ''))) {
             $skipped[] = $unit['secret'] . '   (add a country code, e.g. +254…)';
         }
+    } elseif ($kind === 'proxy') {
+        // The address is already validated at parse time, so nothing further
+        // to flag here — rejected lines are reported separately below.
+        continue;
     } elseif (count($unit['fields']) < 2) {
         $skipped[] = $unit['secret'];
     }
@@ -85,6 +90,8 @@ if ($dryRun) {
             $parsed
         ), 0, 10),
         'needs_review' => array_slice($skipped, 0, 20),
+        // Lines that could not be stored at all, with the reason.
+        'rejected' => array_slice($rejected, 0, 20),
     ]);
 }
 
@@ -104,4 +111,5 @@ json_ok([
     'duplicates' => $result['duplicates'],
     'available' => $result['available'],
     'needs_review' => array_slice($skipped, 0, 20),
+    'rejected' => array_slice($rejected, 0, 20),
 ]);

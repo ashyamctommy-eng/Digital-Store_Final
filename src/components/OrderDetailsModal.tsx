@@ -6,12 +6,14 @@ import { fetchCredentials, type DeliveredCredential } from "@/lib/payments";
 import type { LocalOrder } from "@/lib/orderStore";
 import {
   SMS_WARNINGS,
+  PROXY_WARNINGS,
   USAGE_WARNINGS,
   allCredentialsText,
   copyText,
   downloadOrderText,
 } from "@/lib/orderText";
 import SmsNumberCard from "./SmsNumberCard";
+import ProxyListCard from "./ProxyListCard";
 
 interface OrderDetailsModalProps {
   order: LocalOrder;
@@ -82,8 +84,19 @@ export default function OrderDetailsModal({
   }, [order.orderId, order.token, hasToken]);
 
   const smsNumbers = (credentials ?? []).filter((c) => c.kind === "sms");
-  const plainCredentials = (credentials ?? []).filter((c) => c.kind !== "sms");
+  const proxyUnits = (credentials ?? []).filter((c) => c.kind === "proxy");
+  const plainCredentials = (credentials ?? []).filter(
+    (c) => c.kind !== "sms" && c.kind !== "proxy"
+  );
   const hasSms = smsNumbers.length > 0 || order.items.some((i) => i.product_id.startsWith("sms-"));
+  const hasProxy =
+    proxyUnits.length > 0 || order.items.some((i) => i.product_id.startsWith("proxy-"));
+  // The banner shows one set of warnings; a mixed order gets both lists.
+  const bannerWarnings = [
+    ...(hasSms ? SMS_WARNINGS : []),
+    ...(hasProxy ? PROXY_WARNINGS : []),
+    ...(hasSms || hasProxy ? [] : USAGE_WARNINGS),
+  ];
 
   const totalQty = order.items.reduce((sum, i) => sum + i.quantity, 0);
   const productTitle =
@@ -166,7 +179,7 @@ export default function OrderDetailsModal({
         {/* Usage warnings */}
         <div className="bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200 dark:border-amber-500/25 px-5 py-3 flex-shrink-0">
           <ul className="space-y-1">
-            {(hasSms ? SMS_WARNINGS : USAGE_WARNINGS).map((w) => (
+            {bannerWarnings.map((w) => (
               <li
                 key={w}
                 className="flex items-start gap-2 text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300"
@@ -261,6 +274,25 @@ export default function OrderDetailsModal({
                         orderId={order.orderId}
                         token={order.token}
                       />
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Proxy units: the IP:PORT list, with Copy All */}
+              {proxyUnits.length > 0 && (
+                <div className="rounded-2xl border border-[var(--color-line)] overflow-hidden mb-4">
+                  <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-[var(--color-page)] border-b border-[var(--color-line)]">
+                    <span className="text-[9px] font-extrabold uppercase tracking-[0.12em] text-[var(--color-ink-faint)]">
+                      Proxy addresses
+                    </span>
+                    <span className="text-[9px] font-bold text-[var(--color-ink-faint)]">
+                      {proxyUnits.reduce((n, u) => n + (u.proxies?.length ?? 0), 0)}
+                    </span>
+                  </div>
+                  <ul className="divide-y divide-[var(--color-line)]">
+                    {proxyUnits.map((cred, i) => (
+                      <ProxyListCard key={`${cred.uid}-${i}`} cred={cred} />
                     ))}
                   </ul>
                 </div>

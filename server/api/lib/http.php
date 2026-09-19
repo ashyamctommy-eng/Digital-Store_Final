@@ -184,7 +184,10 @@ function require_admin(array $config): void
 /**
  * Minimal JSON HTTP client.
  *
- * @return array{status:int, body:array|null, raw:string, error:string|null}
+ * Response headers are captured too, because some providers report quota
+ * state only in headers (NextProxy puts its rate-limit counters there).
+ *
+ * @return array{status:int, body:array|null, raw:string, error:string|null, headers:array<string,string>}
  */
 function http_json_request(
     string $method,
@@ -194,6 +197,10 @@ function http_json_request(
     int $timeoutSeconds = 30
 ): array {
     $ch = curl_init($url);
+
+    // Header names are lower-cased so callers do not have to guess the casing
+    // a given CDN happens to use.
+    $responseHeaders = [];
 
     $headerLines = [];
     foreach ($headers as $key => $value) {
@@ -211,6 +218,17 @@ function http_json_request(
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_SSL_VERIFYHOST => 2,
         CURLOPT_USERAGENT => 'DigitalHubShop/1.0',
+        CURLOPT_HEADERFUNCTION => static function ($_ch, string $line) use (&$responseHeaders): int {
+            $length = strlen($line);
+            $parts = explode(':', $line, 2);
+            if (count($parts) === 2) {
+                $name = strtolower(trim($parts[0]));
+                if ($name !== '') {
+                    $responseHeaders[$name] = trim($parts[1]);
+                }
+            }
+            return $length;
+        },
     ];
 
     if ($payload !== null) {
@@ -227,7 +245,13 @@ function http_json_request(
     curl_close($ch);
 
     if ($raw === false) {
-        return ['status' => 0, 'body' => null, 'raw' => '', 'error' => $error ?: 'network error'];
+        return [
+            'status' => 0,
+            'body' => null,
+            'raw' => '',
+            'error' => $error ?: 'network error',
+            'headers' => $responseHeaders,
+        ];
     }
 
     $decoded = json_decode((string) $raw, true);
@@ -237,6 +261,7 @@ function http_json_request(
         'body' => is_array($decoded) ? $decoded : null,
         'raw' => substr((string) $raw, 0, 2000),
         'error' => null,
+        'headers' => $responseHeaders,
     ];
 }
 

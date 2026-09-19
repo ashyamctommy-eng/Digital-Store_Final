@@ -310,8 +310,8 @@ export interface DeliveredCredential {
   uid: string;
   /** Raw pasted line: UID|Password|Email */
   account_data: string;
-  /** "credentials" or "sms". */
-  kind?: "credentials" | "sms";
+  /** "credentials", "sms" or "proxy". */
+  kind?: "credentials" | "sms" | "proxy";
   /** SMS only: the number the code will arrive on. */
   phone_number?: string | null;
   /** SMS only: pre-bought numbers carry a link to watch the inbox. */
@@ -323,6 +323,18 @@ export interface DeliveredCredential {
   operator?: string | null;
   /** SMS only: the verification code, once it has arrived. */
   code?: string | null;
+  /**
+   * Proxy only: the IP:PORT addresses for this unit. One unit is worth however
+   * many addresses the catalog says ("10 IPs", "25 IPs").
+   */
+  proxies?: string[];
+  proxy_count?: number | null;
+  /** Proxy only: the country the pool was filtered to. */
+  proxy_country?: string | null;
+  /** Proxy only: the protocol the addresses speak (https, socks5…). */
+  proxy_protocol?: string | null;
+  /** Proxy only: the provider tier that served the batch. */
+  pool_tier?: string | null;
 }
 
 export interface SmsNumber {
@@ -392,7 +404,10 @@ export async function fetchSmsStatus(
 export async function fetchStockCounts(): Promise<
   ApiResult<{
     counts: Record<string, number>;
-    /** SMS products with no static stock that can still be bought on demand. */
+    /**
+     * Products with no usable static stock that the provider can still supply,
+     * either SMS or proxy.
+     */
     dynamic: string[];
     generated_at: string;
   }>

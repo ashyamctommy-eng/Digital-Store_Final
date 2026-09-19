@@ -14,6 +14,7 @@ require_once __DIR__ . '/lib/palplus.php';
 require_once __DIR__ . '/lib/nowpayments.php';
 require_once __DIR__ . '/lib/smsotp.php';
 require_once __DIR__ . '/lib/catalog.php';
+require_once __DIR__ . '/lib/nextproxy.php';
 
 $config = load_config();
 apply_cors($config);
@@ -40,6 +41,15 @@ json_ok([
         'balance' => smsotp_is_configured($config) ? smsotp_balance_cached($config)['balance'] : 0,
         'balance_ok' => smsotp_is_configured($config) ? smsotp_balance_cached($config)['ok'] : false,
         'sms_products' => count(catalog_sms_product_ids()),
+    ],
+    'nextproxy' => [
+        // Deliberately not gated on a key: the provider serves its pool
+        // publicly, so requiring one would report a working setup as broken.
+        'configured' => nextproxy_is_configured($config),
+        'enabled' => nextproxy_enabled($config),
+        'key_present' => nextproxy_api_key($config) !== '',
+        'key_source' => nextproxy_key_source($config),
+        'proxy_products' => count(catalog_proxy_product_ids()),
     ],
     'resend' => [
         'configured' => trim((string) config_value($config, 'resend.api_key', '')) !== '',

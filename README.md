@@ -204,6 +204,38 @@ an optional embedded frame.
 > since a real inbox needs its own cookies to show anything, and that flag is
 > only dangerous when the framed document shares our origin.
 
+### On-demand proxy supply
+
+Proxy products are marked `delivery_kind: "proxy"` and fulfil in the same order
+as SMS, from a fixed chain:
+
+| # | Source | When it is used |
+| --- | --- | --- |
+| 1 | **Pre-bought stock** | Always tried first — addresses the admin uploaded as `IP:PORT`. |
+| 2 | **On-demand pool** ([NextProxy](https://console.nextproxy.site)) | Only when pre-bought stock cannot make a whole unit. |
+| 3 | **Out of Stock** | Neither available: purchase is disabled. |
+
+One unit of a proxy product is worth `per_unit` addresses (10 IPs, 25 IPs…), so
+both sources are counted in **addresses** and only chunked into units afterwards.
+Only whole units are delivered: a buyer who paid for 10 addresses is never handed
+7 because the pool ran dry — that becomes a shortfall instead, and the stranded
+addresses stay in stock for the next order.
+
+Addresses are validated by one shared module (`lib/proxyaddr.php`) for both
+hand-pasted stock and provider responses. Private, loopback, link-local,
+carrier-NAT and documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`,
+`203.0.113.0/24`) are refused — they cannot route for a buyer, so selling one is
+a guaranteed support ticket.
+
+The integration is **opt-in**: `nextproxy.enabled` defaults to `false` so no store
+silently starts sourcing addresses from a third party.
+
+> **Read `server/api/DEVELOPER-NOTES.md` before enabling this.** The pool is a
+> shared, publicly-mirrored set of proxies, not dedicated residential or mobile
+> lines, and two of the catalog's proxy descriptions do not match what it
+> supplies. The notes also record where the provider's documentation and the
+> live behaviour disagree — including that its "credits" endpoint does not exist.
+
 ### Order history and credentials
 
 `/account/orders` lists orders from a local index (`dhs.orders.v1`), merged with

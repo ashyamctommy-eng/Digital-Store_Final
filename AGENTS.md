@@ -59,3 +59,18 @@ This is **Digital Hub Shop**, a static-exported digital products marketplace
   before an order is paid.
 - If you add a lib that calls a helper from another lib, add the `require_once`.
   `npm run test:php:requires` catches this, and it has been a real bug twice.
+
+### On-demand proxy supply
+
+- `nextproxy.enabled` defaults to **false**. Keep it that way: a default of true
+  once let an unconfigured install (and the unit tests) call the live provider.
+- `server/api/lib/proxyaddr.php` is the single source of truth for "is this a
+  deliverable address?". Both hand-pasted stock and provider responses go through
+  it. Do not add a second validator — the two would drift.
+- Proxy units are counted in **addresses**, not units, and only whole units are
+  delivered. A partial batch is a shortfall, never a discount.
+- `POST /api/admin/nextproxy-key` writes through `lib/settings.php`, which only
+  accepts keys in `SETTINGS_WRITABLE`. Never widen that list casually, and never
+  return a stored secret unmasked.
+- The provider has no credits endpoint. Do not "fix" the admin console by
+  inventing one; read `server/api/DEVELOPER-NOTES.md` first.

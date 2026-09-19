@@ -66,6 +66,44 @@ return [
     ],
 
     // ---------------------------------------------------------------
+    // NextProxy — on-demand proxy supply (delivery_kind "proxy")
+    // Console: https://console.nextproxy.site
+    //
+    // Used ONLY as a fallback: pre-bought IP:PORT stock is always tried first,
+    // so the provider is only called when that runs out.
+    //
+    // The API key is OPTIONAL. The provider serves its pool to unauthenticated
+    // callers; a key is validated when supplied, and a wrong one fails every
+    // request. Set it in the admin console, here, or via NEXTPROXY_API_KEY —
+    // the admin console value wins.
+    // ---------------------------------------------------------------
+    'nextproxy' => [
+        'api_key' => '',
+        'api_base' => 'https://console.nextproxy.site',
+        // The documented list route. `/api/list` returns the same pool.
+        'list_path' => '/api/proxies',
+        // 'header' sends X-API-Key; 'query' appends ?key= (the original spec);
+        // 'both' sends it twice. Header keeps the key out of access logs.
+        'auth_style' => 'header',
+        // Off switch for the whole integration.
+        'enabled' => true,
+        // Credits/profile endpoint. LEAVE EMPTY — the provider has none
+        // (`/api/profile` returns 404), and quota is read from the
+        // x-ratelimit-* response headers instead. Only set this if your
+        // account is ever given a real credits endpoint.
+        'profile_path' => '',
+        // Largest page to request; guests are capped at 100 by the provider.
+        'max_batch' => 100,
+        // Safety ceiling on the addresses a single order can buy.
+        'max_per_order' => 500,
+        'timeout_seconds' => 20,
+        // How long a probe of the provider is reused before re-checking.
+        'status_cache_seconds' => 300,
+        // How many sample addresses the admin console shows.
+        'status_sample' => 3,
+    ],
+
+    // ---------------------------------------------------------------
     // Resend — transactional email for credential delivery
     // Dashboard: https://resend.com/api-keys  (key starts with re_)
     // `from` must be a domain you have verified in Resend.

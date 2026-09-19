@@ -58,7 +58,8 @@ json_ok([
         static fn ($unit) => [
             'product_id' => $unit['product_id'] ?? '',
             'product_name' => $unit['product_name'] ?? ($unit['product_id'] ?? ''),
-            // "credentials" (UID|Password|Email) or "sms" (number + inbox).
+            // "credentials" (UID|Password|Email), "sms" (number + inbox) or
+            // "proxy" (a list of IP:PORT addresses).
             'kind' => $unit['kind'] ?? 'credentials',
             'uid' => $unit['uid'] ?? '',
             // `secret` is the raw pasted line, i.e. UID|Password|Email.
@@ -71,6 +72,12 @@ json_ok([
             'sms_phone_id' => $unit['sms_phone_id'] ?? null,
             'operator' => $unit['operator'] ?? null,
             'code' => $unit['code'] ?? null,
+            // Proxy-only fields.
+            'proxies' => is_array($unit['proxies'] ?? null) ? array_values($unit['proxies']) : [],
+            'proxy_count' => isset($unit['proxy_count']) ? (int) $unit['proxy_count'] : null,
+            'proxy_country' => $unit['country'] ?? null,
+            'proxy_protocol' => $unit['protocol'] ?? null,
+            'pool_tier' => $unit['pool_tier'] ?? null,
         ],
         $deliverables
     ),

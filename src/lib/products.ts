@@ -32,8 +32,10 @@ export interface Product {
    *  - "credentials" (default): a pre-bought account line from inventory.
    *  - "sms": a phone number + inbox, served from pre-bought stock first and
    *    from the on-demand provider only when static stock runs out.
+   *  - "proxy": an IP:PORT list from the proxy provider, with pre-bought
+   *    IP:PORT stock preferred for the same reason.
    */
-  delivery_kind?: "credentials" | "sms";
+  delivery_kind?: "credentials" | "sms" | "proxy";
   /** Required when delivery_kind is "sms". Drives the on-demand provider. */
   sms?: {
     /** Provider service code: wa, tg, fb, go, lf … */
@@ -43,6 +45,17 @@ export interface Product {
     /** 1 = all countries, 2 = USA only, 3 = requires provider_id. */
     server_id?: string;
     /** Display label for the service being verified. */
+    label: string;
+  };
+  /** Required when delivery_kind is "proxy". Drives the proxy provider. */
+  proxy?: {
+    /** ISO country code the pool is filtered to ("" or "ALL" for any). */
+    country: string;
+    /** Protocol filter: https, socks4, socks5 ("" for any). */
+    protocol: string;
+    /** How many addresses one unit of this product is worth. */
+    per_unit: number;
+    /** Display label for the network being supplied. */
     label: string;
   };
 }
@@ -457,7 +470,9 @@ export const products: Product[] = [
     country_flags: "🌐",
     price_usd: 46.00,
     image: "/assets/images/proxy-logo.svg",
-    stock: 999,
+    // Availability comes from pre-bought IP:PORT stock or the proxy provider,
+    // never from a hard-coded number.
+    stock: 0,
     description:
       "Clean static residential proxies for multi-accounting and scrapers",
     specs: [
@@ -471,8 +486,16 @@ export const products: Product[] = [
     badge: "Best Seller",
     featured: true,
     delivery: "Instant",
+    delivery_kind: "proxy",
+    proxy: { country: "US", protocol: "https", per_unit: 10, label: "Static IPs" },
   },
   {
+    /*
+     * Deliberately NOT delivery_kind "proxy": this sells 5GB of rotating
+     * bandwidth with a gateway credential, not a list of addresses. The proxy
+     * provider hands back IP:PORT pairs, so auto-fulfilling this would deliver
+     * the wrong thing. Stock it by hand.
+     */
     id: "proxy-rot-01",
     slug: "rotating-residential-proxies-5gb",
     name: "Rotating Residential Proxies — 5GB",
@@ -499,7 +522,7 @@ export const products: Product[] = [
     country_flags: "🇺🇸🌐",
     price_usd: 55.50,
     image: "/assets/images/proxy-logo.svg",
-    stock: 9,
+    stock: 0,
     description: "Premium 4G mobile proxies on US carrier networks",
     specs: [
       "5 dedicated 4G mobile IPs",
@@ -509,6 +532,8 @@ export const products: Product[] = [
     guide_url: "https://drive.google.com/",
     badge: "Hot",
     delivery: "Within 1 hour",
+    delivery_kind: "proxy",
+    proxy: { country: "US", protocol: "socks5", per_unit: 5, label: "Mobile IPs" },
   },
   {
     id: "proxy-dc-03",
@@ -518,7 +543,7 @@ export const products: Product[] = [
     country_flags: "🌐",
     price_usd: 17.00,
     image: "/assets/images/proxy-logo.svg",
-    stock: 320,
+    stock: 0,
     description: "Fast datacenter proxies for scraping and bulk requests",
     specs: [
       "25 datacenter IPs",
@@ -527,6 +552,8 @@ export const products: Product[] = [
     ],
     guide_url: "",
     delivery: "Instant",
+    delivery_kind: "proxy",
+    proxy: { country: "", protocol: "https", per_unit: 25, label: "Datacenter IPs" },
   },
 ];
 
@@ -651,3 +678,30 @@ export function getSmsSpec(productId: string): SmsSpec | null {
 
 /** Every SMS product, used to keep the server-side catalog map in step. */
 export const smsProducts: Product[] = products.filter(isSmsProduct);
+
+/** True when a product is fulfilled as an IP:PORT list. */
+export function isProxyProduct(product: Product): boolean {
+  return product.delivery_kind === "proxy";
+}
+
+export interface ProxySpec {
+  country: string;
+  protocol: string;
+  per_unit: number;
+  label: string;
+}
+
+/** The proxy provider spec for a proxy product, if it has one. */
+export function getProxySpec(productId: string): ProxySpec | null {
+  const product = products.find((p) => p.id === productId);
+  if (!product || !product.proxy) return null;
+  return {
+    country: product.proxy.country,
+    protocol: product.proxy.protocol,
+    per_unit: Math.max(1, product.proxy.per_unit),
+    label: product.proxy.label,
+  };
+}
+
+/** Every proxy product, used to keep the server-side catalog map in step. */
+export const proxyProducts: Product[] = products.filter(isProxyProduct);

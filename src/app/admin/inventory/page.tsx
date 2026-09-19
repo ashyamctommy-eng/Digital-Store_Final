@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { categories, getCategory } from "@/lib/categories";
-import { isSmsProduct, products } from "@/lib/products";
+import { isProxyProduct, isSmsProduct, products } from "@/lib/products";
 import { formatPrice } from "@/lib/currency";
 import Icon from "@/components/ui/Icon";
 import {
@@ -96,7 +96,12 @@ export default function AdminInventoryPage() {
   const selectedProduct = products.find((p) => p.id === productId);
   const category = selectedProduct ? getCategory(selectedProduct.category) : undefined;
   const selectedIsSms = selectedProduct ? isSmsProduct(selectedProduct) : false;
-  const stockKind = selectedIsSms ? "sms" : "credentials";
+  const selectedIsProxy = selectedProduct ? isProxyProduct(selectedProduct) : false;
+  const stockKind = selectedIsSms
+    ? "sms"
+    : selectedIsProxy
+      ? "proxy"
+      : "credentials";
 
   const parsed = useMemo(
     () => parseCredentialLines(text, stockKind),
@@ -278,6 +283,20 @@ export default function AdminInventoryPage() {
                     a plain note otherwise. Include the country code —{" "}
                     <code className="text-[10px]">0712345678</code> is ambiguous.
                   </>
+                ) : selectedIsProxy ? (
+                  <>
+                    This is a proxy product, so one{" "}
+                    <strong>address per line</strong>:
+                    <br />
+                    <code className="text-[10px]">IP:PORT</code>
+                    <br />
+                    <code className="text-[10px]">203.0.113.10:8080</code>
+                    <br />
+                    A private, reserved or malformed address is refused, and any
+                    it rejects will be listed for you. Pre-bought addresses are
+                    used before the provider, and a unit only counts when it has
+                    a full set.
+                  </>
                 ) : (
                   <>
                     One credential per line:
@@ -296,7 +315,9 @@ export default function AdminInventoryPage() {
               <label className={label}>
                 {selectedIsSms
                   ? "Numbers — one per line (PHONE_NUMBER | INBOX_URL_OR_NOTES)"
-                  : "Credentials — one per line"}
+                  : selectedIsProxy
+                    ? "Addresses — one per line (IP:PORT)"
+                    : "Credentials — one per line"}
               </label>
               <textarea
                 value={text}
@@ -310,7 +331,9 @@ export default function AdminInventoryPage() {
                 placeholder={
                   selectedIsSms
                     ? "+15551234567 | https://inbox.example/abc123\n+15559876543 | Keep this page open\n+12545550123"
-                    : "acc001|Passw0rd!|mail1@example.com\nacc002|Passw0rd!|mail2@example.com\nhost.example.com:8080:user:pass"
+                    : selectedIsProxy
+                      ? "203.0.113.10:8080\n203.0.113.11:8080\n198.51.100.7:3128"
+                      : "acc001|Passw0rd!|mail1@example.com\nacc002|Passw0rd!|mail2@example.com\nhost.example.com:8080:user:pass"
                 }
                 className={`${inputClass} font-mono text-[11px] resize-y leading-relaxed`}
               />
@@ -323,7 +346,7 @@ export default function AdminInventoryPage() {
                   <span className="font-bold">
                     {parsed.length} line{parsed.length === 1 ? "" : "s"} parsed
                   </span>
-                  {needsReview.length > 0 && (
+                  {needsReview.length > 0 && !selectedIsProxy && (
                     <span className="text-[var(--color-warning)] font-bold">
                       {needsReview.length}{" "}
                       {selectedIsSms ? "missing an inbox link" : "without a UID|Password pair"}
@@ -342,6 +365,11 @@ export default function AdminInventoryPage() {
                         <>
                           {p.phone}
                           {p.inboxUrl ? `  →  ${p.inboxUrl}` : p.notes ? `  →  ${p.notes}` : "  →  (no inbox yet)"}
+                        </>
+                      ) : selectedIsProxy ? (
+                        <>
+                          {p.uid}
+                          {p.notes ? `  →  ${p.notes}` : "  →  ready to sell"}
                         </>
                       ) : (
                         p.uid

@@ -11,7 +11,8 @@
  * `orderQty` is the quantity on the order itself.
  *
  * The line format follows the product's delivery kind from the generated
- * catalog: phone|inbox for SMS products, UID|Password|Email otherwise.
+ * catalog: phone|inbox for SMS products, IP:PORT for proxy products, and
+ * UID|Password|Email otherwise.
  */
 
 declare(strict_types=1);
@@ -34,16 +35,19 @@ $config = ['data_dir' => $argv[1]];
     $argv[7] ?? 'buyer@example.test',
 ];
 
-$isSms = catalog_is_sms($productId);
+$kind = catalog_delivery_kind($productId) ?? 'credentials';
 
 if ($stockUnits > 0) {
     $lines = [];
     for ($i = 0; $i < $stockUnits; $i++) {
-        $lines[] = $isSms
-            ? sprintf('+1555999%04d | https://inbox.test/seed%d', $i, $i + 1)
-            : sprintf('SEED%d|secret%d|buyer%d@example.test', $i + 1, $i + 1, $i + 1);
+        $lines[] = match ($kind) {
+            'sms' => sprintf('+1555999%04d | https://inbox.test/seed%d', $i, $i + 1),
+            // Distinct, routable-looking addresses so deduplication is visible.
+            'proxy' => sprintf('203.0.9.%d:%d', $i + 1, 9000 + $i),
+            default => sprintf('SEED%d|secret%d|buyer%d@example.test', $i + 1, $i + 1, $i + 1),
+        };
     }
-    inventory_add_units($config, $productId, implode("\n", $lines), $isSms ? 'sms' : 'credentials');
+    inventory_add_units($config, $productId, implode("\n", $lines), $kind);
 }
 
 store_write_order($config, [
@@ -61,7 +65,7 @@ store_write_order($config, [
 
 echo json_encode([
     'product_id' => $productId,
-    'kind' => $isSms ? 'sms' : 'credentials',
+    'kind' => $kind,
     'stock_added' => $stockUnits,
     'available' => inventory_count_available($config, $productId),
     'order_id' => $orderId,

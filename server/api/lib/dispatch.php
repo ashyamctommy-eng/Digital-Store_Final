@@ -11,6 +11,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/inventory.php';
 require_once __DIR__ . '/catalog.php';
 require_once __DIR__ . '/smsotp.php';
+require_once __DIR__ . '/nextproxy.php';
+require_once __DIR__ . '/proxyaddr.php';
 
 /** Normalises the cart lines sent by the storefront. */
 function dispatch_normalise_items(array $rawItems): array
@@ -133,6 +135,133 @@ function dispatch_claim_sms(array $config, string $productId, int $qty, string $
     ];
 }
 
+
+/**
+ * Fulfils one proxy line, preferring stock we already own.
+ *
+ * Same shape as the SMS chain:
+ *   1. pre-bought IP:PORT stock (already paid for);
+ *   2. otherwise source addresses from the proxy provider;
+ *   3. otherwise leave the remainder as a shortfall so the storefront shows
+ *      Out of Stock instead of selling something we cannot deliver.
+ *
+ * One unit of a proxy product is worth `per_unit` addresses (the catalog says
+ * "10 IPs", "25 IPs"), so both sources are counted in ADDRESSES here and only
+ * chunked into units afterwards. Only whole units are delivered: a buyer who
+ * paid for 10 addresses is never handed 7 because the pool ran dry — that
+ * shows up as a shortfall instead.
+ *
+ * @return array{units:array, shortfall:int, dynamic_error:?string}
+ */
+function dispatch_claim_proxy(array $config, string $productId, int $qty, string $orderId): array
+{
+    $spec = catalog_proxy_spec($productId);
+    if ($spec === null) {
+        return ['units' => [], 'shortfall' => $qty, 'dynamic_error' => 'Product is not a proxy product.'];
+    }
+
+    $perUnit = max(1, (int) ($spec['per_unit'] ?? 1));
+
+    // 1. Pre-bought stock. Count first so only whole units are claimed — a
+    //    claim of 7 leftover addresses would be sold as a 10-IP product.
+    $available = inventory_count_available($config, $productId);
+    $staticUnits = min($qty, intdiv($available, $perUnit));
+
+    $staticAddresses = [];
+    if ($staticUnits > 0) {
+        $claim = inventory_claim($config, $productId, $staticUnits * $perUnit, $orderId);
+        foreach ($claim['units'] as $unit) {
+            $address = (string) ($unit['proxy'] ?? $unit['uid'] ?? '');
+            if ($address !== '') {
+                $staticAddresses[] = $address;
+            }
+        }
+    }
+
+    $units = [];
+    foreach (array_chunk($staticAddresses, $perUnit) as $chunk) {
+        if (count($chunk) < $perUnit || count($units) >= $qty) {
+            // A racing order shrank the pool between counting and claiming;
+            // stop rather than deliver a partial unit.
+            break;
+        }
+        $units[] = [
+            'kind' => 'proxy',
+            'source' => 'static',
+            'product_id' => $productId,
+            'uid' => $chunk[0],
+            'secret' => implode(PHP_EOL, $chunk),
+            'proxies' => array_values($chunk),
+            'proxy_count' => count($chunk),
+            'country' => strtoupper((string) ($spec['country'] ?? '')),
+            'protocol' => (string) ($spec['protocol'] ?? ''),
+            'notes' => '',
+        ];
+    }
+
+    $remaining = $qty - count($units);
+    if ($remaining <= 0) {
+        return ['units' => $units, 'shortfall' => 0, 'dynamic_error' => null];
+    }
+
+    // 2. On-demand supply.
+    if (!nextproxy_is_configured($config)) {
+        return [
+            'units' => $units,
+            'shortfall' => $remaining,
+            'dynamic_error' => 'The proxy provider is not enabled.',
+        ];
+    }
+
+    $fetch = nextproxy_fetch(
+        $config,
+        $remaining * $perUnit,
+        (string) ($spec['country'] ?? ''),
+        (string) ($spec['protocol'] ?? '')
+    );
+
+    if (!$fetch['ok']) {
+        return ['units' => $units, 'shortfall' => $remaining, 'dynamic_error' => $fetch['error']];
+    }
+
+    $meta = $fetch['meta'] ?? [];
+    $dynamicError = null;
+    $partial = 0;
+
+    foreach (array_chunk($fetch['proxies'], $perUnit) as $chunk) {
+        if (count($units) >= $qty) {
+            break;
+        }
+        if (count($chunk) < $perUnit) {
+            $partial = count($chunk);
+            break;
+        }
+        $units[] = [
+            'kind' => 'proxy',
+            'source' => 'dynamic',
+            'product_id' => $productId,
+            'uid' => $chunk[0],
+            'secret' => implode(PHP_EOL, $chunk),
+            'proxies' => array_values($chunk),
+            'proxy_count' => count($chunk),
+            'country' => strtoupper((string) ($spec['country'] ?? '')),
+            'protocol' => (string) ($spec['protocol'] ?? ''),
+            // Recorded for support: a shared-pool batch can be replaced later.
+            'pool_tier' => $meta['tier'] ?? null,
+            'notes' => '',
+        ];
+    }
+
+    $shortfall = max(0, $qty - count($units));
+    if ($shortfall > 0) {
+        $dynamicError = $fetch['error'] ?? ($partial > 0
+            ? 'The provider pool returned an incomplete batch.'
+            : 'The provider pool was smaller than requested.');
+    }
+
+    return ['units' => $units, 'shortfall' => $shortfall, 'dynamic_error' => $dynamicError];
+}
+
 /**
  * Claims stock for every line in a paid order and records the deliverables.
  *
@@ -177,9 +306,12 @@ function dispatch_order(array $config, string $orderId): array
 
         // The delivery kind comes from the generated server-side catalog, not
         // from the browser — fulfilment decides how money is spent.
-        $result = catalog_is_sms($productId)
-            ? dispatch_claim_sms($config, $productId, $qty, $orderId)
-            : array_merge(inventory_claim($config, $productId, $qty, $orderId), ['dynamic_error' => null]);
+        $kind = catalog_delivery_kind($productId);
+        $result = match ($kind) {
+            'sms' => dispatch_claim_sms($config, $productId, $qty, $orderId),
+            'proxy' => dispatch_claim_proxy($config, $productId, $qty, $orderId),
+            default => array_merge(inventory_claim($config, $productId, $qty, $orderId), ['dynamic_error' => null]),
+        };
 
         foreach ($result['units'] as $unit) {
             $deliverables[] = array_merge($unit, [
@@ -269,6 +401,25 @@ function dispatch_render_text(array $order, array $deliverables, bool $includeTo
                 }
                 if (!empty($unit['code'])) {
                     $lines[] = 'Code:    ' . $unit['code'];
+                }
+                $lines[] = '';
+                continue;
+            }
+
+            if (($unit['kind'] ?? '') === 'proxy') {
+                $proxies = is_array($unit['proxies'] ?? null) ? $unit['proxies'] : [];
+                $lines[] = 'Proxies (' . count($proxies) . '):';
+                foreach ($proxies as $proxy) {
+                    $lines[] = '  ' . $proxy;
+                }
+                if (!empty($unit['country'])) {
+                    $lines[] = 'Country: ' . $unit['country'];
+                }
+                if (!empty($unit['protocol'])) {
+                    $lines[] = 'Protocol: ' . $unit['protocol'];
+                }
+                if (!empty($unit['notes'])) {
+                    $lines[] = 'Notes:   ' . $unit['notes'];
                 }
                 $lines[] = '';
                 continue;
