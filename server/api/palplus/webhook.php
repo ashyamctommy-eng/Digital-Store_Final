@@ -18,6 +18,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/http.php';
 require_once __DIR__ . '/../lib/store.php';
 require_once __DIR__ . '/../lib/palplus.php';
+require_once __DIR__ . '/../lib/pricing.php';
 require_once __DIR__ . '/../lib/email.php';
 
 $config = load_config();
@@ -80,7 +81,22 @@ if ($authoritative === null) {
 $providerStatus = palplus_map_status($authoritative['status'] ?? null);
 $receipt = $authoritative['mpesa_receipt'] ?? null;
 $paidAmount = (int) ($authoritative['amount'] ?? 0);
-$expectedAmount = (int) ($order['amount_kes'] ?? 0);
+
+// What the order SHOULD have cost, recomputed from the catalog rather than read
+// back from the record. Trusting `$order['amount_kes']` would compare the paid
+// amount against a number that originated in the request body — the check would
+// pass for any amount a buyer chose. Falls back to the stored figure only when
+// the cart cannot be priced (an order written before pricing moved server-side).
+$catalogAmount = pricing_total_kes($config, dispatch_normalise_items($order['items'] ?? []));
+$expectedAmount = $catalogAmount ?? (int) ($order['amount_kes'] ?? 0);
+
+if ($catalogAmount !== null && $catalogAmount !== (int) ($order['amount_kes'] ?? 0)) {
+    store_log($config, 'palplus.webhook.ledger_amount_drift', [
+        'order_id' => $orderId,
+        'ledger_amount_kes' => (int) ($order['amount_kes'] ?? 0),
+        'catalog_amount_kes' => $catalogAmount,
+    ]);
+}
 
 // Guard against a tampered or mismatched amount.
 if ($providerStatus === 'paid' && $expectedAmount > 0 && $paidAmount !== $expectedAmount) {

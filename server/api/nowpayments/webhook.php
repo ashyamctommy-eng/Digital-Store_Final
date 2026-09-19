@@ -17,6 +17,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/http.php';
 require_once __DIR__ . '/../lib/store.php';
 require_once __DIR__ . '/../lib/nowpayments.php';
+require_once __DIR__ . '/../lib/pricing.php';
+require_once __DIR__ . '/../lib/dispatch.php';
 require_once __DIR__ . '/../lib/email.php';
 
 $config = load_config();
@@ -72,6 +74,33 @@ if ($status === 'paid' && $paymentId !== '') {
     if ($verified !== null) {
         $status = nowpayments_map_status($verified['payment_status'] ?? null);
     }
+}
+
+// Amount check. Without this, an invoice raised for any amount at all settles
+// as paid: the signature proves the callback is genuinely from NOWPayments, not
+// that the right amount was paid.
+$expectedUsd = pricing_total_usd(dispatch_normalise_items($order['items'] ?? []))
+    ?? (float) ($order['amount_usd'] ?? 0);
+$settledPrice = $verified['price_amount'] ?? $priceAmount;
+
+if (
+    $status === 'paid'
+    && $expectedUsd > 0
+    && $settledPrice !== null
+    && abs((float) $settledPrice - $expectedUsd) > PRICING_TOLERANCE_CENTS
+) {
+    store_update_order($config, $orderId, [
+        'status' => 'failed',
+        'failure_reason' => 'amount_mismatch',
+        'paid_amount_usd' => (float) $settledPrice,
+        'expected_amount_usd' => $expectedUsd,
+    ]);
+    store_log($config, 'nowpayments.webhook.amount_mismatch', [
+        'order_id' => $orderId,
+        'paid' => (float) $settledPrice,
+        'expected' => $expectedUsd,
+    ]);
+    json_response_then(['ok' => true, 'rejected' => 'amount mismatch'], $noop);
 }
 
 store_update_order($config, $orderId, [

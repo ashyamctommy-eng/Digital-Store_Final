@@ -230,7 +230,37 @@ to skip and produces "customer paid, nothing delivered".
 
 ---
 
-## Step 7 — Load your stock
+## Step 7 — Lock down Firestore (2 minutes, do not skip)
+
+The store does not use Firestore, but your Firebase project still has settings,
+and a Firebase project with no rules of its own is a public database. This is
+the one step that has nothing to do with the files you just uploaded.
+
+1. Open <https://console.firebase.google.com> → pick the project → **Firestore
+   Database → Rules**.
+2. Paste the contents of `deploy/cpanel/firestore.rules` from this repo (it
+   denies every client read and write) and press **Publish**.
+3. Check the existing rules first. If you see
+
+   ```
+   allow read, write: if request.time < timestamp.date(2026, ...)
+   ```
+
+   you are on the default **test mode** rules. They allow anyone who views your
+   page source — your web API key is public — to read and write the whole
+   database, and they stop working entirely on the date shown.
+
+**Why "deny everything" is correct here.** Orders used to be mirrored into a
+Firestore `orders` collection from the browser, and the admin console read that
+collection. That was removed: the browser was supplying the shop's record of a
+sale, so a forged document looked like a real order, and the list the admin saw
+was not the list the webhooks settled against. Orders now live only in the PHP
+ledger you just uploaded, and the admin screens read it through the admin key.
+Nothing in the store reads or writes Firestore any more, so there is nothing to
+grant. Google sign-in still works — Firebase Auth is a separate product and is
+unaffected by these rules.
+
+## Step 8 — Load your stock
 
 **Admin → Stock & Credentials.** Pick a product; the form tells you the accepted
 format for that kind of product:
@@ -249,7 +279,7 @@ Use the preview above the button to confirm the lines parsed before committing.
 
 ---
 
-## Step 8 — The one thing no test can do for you
+## Step 9 — The one thing no test can do for you
 
 **Run one small real transaction on each gateway.**
 
@@ -294,10 +324,6 @@ cheapest product in your own store, and check:
   paste it into Configurations and the store switches over without a redeploy.
 - **Re-run the bundle check before any future upload** — `npm run verify:bundle`
   refuses to bless a build that contains a key or is missing a file.
-- **Publish Firestore security rules.** The admin *pages* are gated in the
-  browser, and every admin *API* call additionally requires the admin key — but
-  the storefront also mirrors orders into a Firestore `orders` collection from
-  the browser. If that Firebase project is still on the default test rules,
-  anyone can read every order and write fake ones. Scope the rules to the two
-  addresses above, or stop mirroring orders to Firestore (the PHP ledger is the
-  source of truth).
+- **Re-check Firestore rules after any Firebase console change.** The shipped
+  rules deny everything, which is what the store needs; if you ever add a
+  collection there, add a rule for it in the same sitting.

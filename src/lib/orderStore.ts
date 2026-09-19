@@ -12,7 +12,11 @@ import type { OrderStatus } from "./payments";
  * reads it back.
  *
  * This is the authoritative list for a guest buyer. Firestore still mirrors
- * orders for signed-in customers so history can follow them across devices.
+ * orders in the buyer's own browser. Each record carries the order's retrieval
+ * token, which is the only way to read the credentials back — so this store is
+ * what makes Order History work without an account. There is no server-side copy
+ * of a buyer's list: the ledger holds every order, but only its token-holder (or
+ * an admin) can read a given one.
  */
 export interface LocalOrder {
   orderId: string;

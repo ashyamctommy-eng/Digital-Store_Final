@@ -1,20 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import {
-  collection,
-  getDocs,
-  query,
-  orderBy,
-  doc,
-  updateDoc,
-} from "firebase/firestore";
-import { db } from "@/lib/firestore";
-import {
-  ORDER_STATUSES,
-  type OrderStatus,
-  type StoredOrder,
-} from "@/lib/orders";
+import { ORDER_STATUSES, type OrderStatus } from "@/lib/orders";
+import { toAdminOrderView, type AdminOrderView } from "@/lib/adminOrders";
+import { adminListOrders, adminSetOrderStatus } from "@/lib/adminApi";
 import { formatPrice } from "@/lib/currency";
 import Icon from "@/components/ui/Icon";
 
@@ -29,27 +18,25 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export default function AdminOrdersPage() {
-  const [orders, setOrders] = useState<StoredOrder[]>([]);
+  const [orders, setOrders] = useState<AdminOrderView[]>([]);
+  const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | OrderStatus>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
+  // The orders fulfilment acted on live in the PHP ledger, so that is what this
+  // screen reads. The previous version read a `orders` collection the browser
+  // wrote at checkout: a list the customer could edit, and not the list the
+  // webhook settled.
   useEffect(() => {
     async function load() {
-      try {
-        const snap = await getDocs(
-          query(collection(db, "orders"), orderBy("createdAt", "desc"))
-        );
-        setOrders(
-          snap.docs.map((d) => ({
-            ...(d.data() as Omit<StoredOrder, "id">),
-            id: d.id,
-            createdAt: d.data().createdAt?.toDate(),
-          }))
-        );
-      } catch (e) {
-        console.error("Failed to load orders:", e);
+      const res = await adminListOrders({ limit: 500 });
+      if (res.ok && res.data) {
+        setOrders(res.data.orders.map(toAdminOrderView));
+        setLoadError("");
+      } else {
+        setLoadError(res.error ?? "Could not load orders.");
       }
       setLoading(false);
     }
@@ -57,13 +44,13 @@ export default function AdminOrdersPage() {
   }, []);
 
   const updateStatus = async (id: string, status: OrderStatus) => {
-    try {
-      await updateDoc(doc(db, "orders", id), { status });
-      setOrders((prev) =>
-        prev.map((o) => (o.id === id ? { ...o, status } : o))
-      );
-    } catch (e) {
-      console.error("Failed to update status:", e);
+    const previous = orders;
+    // Optimistic: the row flips immediately, and is put back if the write fails.
+    setOrders((prev) => prev.map((o) => (o.id === id ? { ...o, status } : o)));
+    const res = await adminSetOrderStatus(id, status);
+    if (!res.ok) {
+      setOrders(previous);
+      setLoadError(res.error ?? "Could not update the order status.");
     }
   };
 
@@ -75,10 +62,10 @@ export default function AdminOrdersPage() {
         [
           o.id,
           o.orderId,
-          o.userName,
-          o.userEmail,
-          o.delivery?.email,
-          o.delivery?.fullName,
+          o.buyerName,
+          o.buyerEmail,
+          o.accountReference,
+          o.phone,
         ]
           .filter(Boolean)
           .join(" ")
@@ -137,7 +124,7 @@ export default function AdminOrdersPage() {
           </p>
         ) : filtered.length === 0 ? (
           <p className="text-center py-16 text-sm text-[var(--color-ink-faint)]">
-            No orders to show.
+            {loadError ? `Could not load orders: ${loadError}` : "No orders to show."}
           </p>
         ) : (
           filtered.map((o) => {
@@ -166,12 +153,11 @@ export default function AdminOrdersPage() {
                         {o.status}
                       </span>
                       <span className="text-[9px] font-bold uppercase px-2 py-0.5 rounded-full bg-[var(--color-line)] text-[var(--color-ink-soft)]">
-                        {o.paymentMethod}
+                        {o.gateway ?? "—"}
                       </span>
                     </div>
                     <p className="text-xs text-[var(--color-ink-soft)] mt-1 truncate">
-                      {o.delivery?.fullName || o.userName || "—"} ·{" "}
-                      {o.delivery?.email || o.userEmail || "—"}
+                      {o.buyerName || "—"} · {o.buyerEmail || "—"}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0">
@@ -203,7 +189,7 @@ export default function AdminOrdersPage() {
                       <ul className="space-y-2">
                         {(o.items ?? []).map((item, i) => (
                           <li
-                            key={`${item.id}-${i}`}
+                            key={`${item.product_id}-${i}`}
                             className="flex items-center gap-3 text-xs"
                           >
                             <span className="flex-1 truncate">{item.name}</span>
@@ -225,17 +211,14 @@ export default function AdminOrdersPage() {
                           Deliver to
                         </p>
                         <p className="text-xs font-semibold">
-                          {o.delivery?.email || o.userEmail || "—"}
+                          {o.buyerEmail || "—"}
                         </p>
                         <p className="text-xs text-[var(--color-ink-soft)]">
-                          {o.delivery?.whatsapp || "—"}
+                          {o.phone || "—"}
                         </p>
-                        <p className="text-xs text-[var(--color-ink-soft)]">
-                          {o.delivery?.country || "—"}
-                        </p>
-                        {o.delivery?.notes && (
-                          <p className="text-[11px] text-[var(--color-ink-faint)] mt-1.5 italic">
-                            “{o.delivery.notes}”
+                        {o.accountReference && (
+                          <p className="text-[11px] text-[var(--color-ink-faint)] mt-1.5 font-mono">
+                            ref {o.accountReference}
                           </p>
                         )}
                       </div>
@@ -244,11 +227,22 @@ export default function AdminOrdersPage() {
                           Payment reference
                         </p>
                         <p className="text-xs font-mono break-all">
-                          {o.paymentReference || "—"}
+                          {o.mpesaReceipt || o.accountReference || "—"}
                         </p>
                         <p className="text-[10px] text-[var(--color-ink-faint)] mt-1.5">
                           Internal id: {o.id}
                         </p>
+                        {o.failureReason && (
+                          <p className="text-[10px] text-red-600 mt-1.5">
+                            {o.failureReason}
+                          </p>
+                        )}
+                        {o.orderToken && (
+                          <p className="text-[10px] text-[var(--color-ink-faint)] mt-1.5">
+                            Buyer token:{" "}
+                            <span className="font-mono">{o.orderToken}</span>
+                          </p>
+                        )}
                       </div>
                     </div>
 

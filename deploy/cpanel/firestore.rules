@@ -1,0 +1,50 @@
+rules_version = '2';
+
+/**
+ * Firestore security rules for the Digital Hub Shop.
+ *
+ * ---------------------------------------------------------------------------
+ * These rules deny everything, and that is correct — the store does not use
+ * Firestore any more. Read this before you loosen them.
+ * ---------------------------------------------------------------------------
+ *
+ * Firebase is still used, for one thing only: Google sign-in (Firebase Auth),
+ * which gates the admin screens. Auth is a separate product and is unaffected by
+ * this file.
+ *
+ * Why there are no order rules
+ * ----------------------------
+ * Orders used to be mirrored here from the browser at checkout, and the admin
+ * console read that collection. That meant the shop's record of a sale came from
+ * the customer's own device: a forged document would look like a real order, and
+ * the list the admin saw was not the list the payment webhook settled. Those
+ * writes and reads are gone. Orders now live only in the PHP ledger
+ * (server/api/lib/store.php), written by the checkout endpoints and settled by
+ * the webhooks, and the admin screens read it through /api/admin/orders, which
+ * requires the admin key.
+ *
+ * So the safest thing this file can say is "no". If you ever add a collection
+ * here, add a rule for it at the same time — an open rule on a Firebase project
+ * with a public web API key is readable by anyone who views your page source.
+ *
+ * How to publish
+ * --------------
+ *   npm run firebase:rules        (see package.json)
+ * or paste this file into
+ *   Firebase console → Firestore Database → Rules → Publish
+ *
+ * If the console still shows `allow read, write: if request.time < timestamp...`
+ * you are on the default test rules, which expire 30 days after the project was
+ * created and deny everything afterwards.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // No client may read or write anything, signed in or not. The storefront is
+    // static, the money lives in the PHP ledger, and every privileged read goes
+    // through an endpoint that checks the admin key.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

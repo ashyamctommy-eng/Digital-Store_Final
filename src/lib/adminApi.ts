@@ -450,3 +450,77 @@ export function parseCredentialLines(
 
   return out;
 }
+
+/* -------------------------------- orders -------------------------------- */
+
+/**
+ * An order record as the PHP ledger stores it (snake_case, the wire format).
+ * `order_token` is the buyer's credential-retrieval key; the admin screen can
+ * see it so it can help someone who lost their browser.
+ */
+export interface LedgerOrder {
+  order_id: string;
+  status?: string;
+  account_reference?: string;
+  order_token?: string;
+  gateway?: string;
+  currency?: string;
+  amount_usd?: number | null;
+  amount_kes?: number | null;
+  paid_amount_kes?: number | null;
+  paid_amount_usd?: number | null;
+  mpesa_receipt?: string | null;
+  buyer_email?: string | null;
+  buyer_name?: string | null;
+  phone?: string | null;
+  items?: {
+    product_id?: string;
+    name?: string;
+    quantity?: number;
+    /** Recorded at sale time; absent on orders written before that. */
+    price_usd?: number;
+    line_usd?: number;
+  }[];
+  deliverables?: unknown[];
+  shortfall?: unknown[];
+  failure_reason?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  settled_at?: string | null;
+  delivered_at?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AdminOrdersResponse {
+  orders: LedgerOrder[];
+  totals: {
+    scanned: number;
+    returned: number;
+    truncated: boolean;
+    counts: Record<string, number>;
+    revenue_usd: number;
+  };
+}
+
+export function adminListOrders(params?: {
+  status?: string;
+  q?: string;
+  limit?: number;
+}): Promise<ApiResult<AdminOrdersResponse>> {
+  const search = new URLSearchParams();
+  if (params?.status) search.set("status", params.status);
+  if (params?.q) search.set("q", params.q);
+  if (params?.limit) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  return adminFetch(`/admin/orders/list${qs ? `?${qs}` : ""}`, { method: "GET" });
+}
+
+export function adminSetOrderStatus(
+  orderId: string,
+  status: string
+): Promise<ApiResult<{ order_id: string; status: string; changed: boolean }>> {
+  return adminFetch("/admin/orders/status", {
+    method: "POST",
+    body: JSON.stringify({ orderId, status }),
+  });
+}

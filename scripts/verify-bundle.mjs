@@ -18,7 +18,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readdir, readFile, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -118,8 +118,8 @@ for (const file of files) {
 }
 if (firebaseKeys > 0) {
   note(
-    `Firebase web API key present in ${firebaseKeys} file(s) — expected and public by design, ` +
-      `but it means Firestore security rules are the only thing protecting your data`
+    `Firebase web API key present in ${firebaseKeys} file(s) — expected and public by design; ` +
+      `it is used only for Google sign-in, and the shipped firestore.rules deny all access`
   );
 }
 
@@ -131,6 +131,59 @@ for (const file of files) {
   if (rel.startsWith("node_modules/") || rel.startsWith(".git/")) {
     fail(`build artefact should not ship: ${rel}`);
   }
+}
+
+// The store must not reach Firestore from the browser. A client-written order
+// collection is how the admin console ended up listing records a customer could
+// forge, and it is a second ledger that can disagree with the real one.
+//
+// Matching the string "firestore" is not enough: the Firebase SDK registers all
+// its products by name, so "@firebase/firestore":"fire-fst" appears in a bundle
+// that has nothing to do with Firestore. These are real call sites instead.
+const FIRESTORE_CALLS = [
+  "getFirestore(",
+  "initializeFirestore(",
+  "addDoc(",
+  "getDocs(",
+  "setDoc(",
+  "updateDoc(",
+  "deleteDoc(",
+  "onSnapshot(",
+];
+
+const firestoreUsers = [];
+for (const file of files) {
+  if (!file.rel.endsWith(".js")) continue;
+  const contents = readFileSync(file.path, "utf8");
+  const hit = FIRESTORE_CALLS.find((call) => contents.includes(call));
+  if (hit) firestoreUsers.push(`${file.rel} (${hit})`);
+}
+if (firestoreUsers.length > 0) {
+  fail(
+    `${firestoreUsers.length} bundled file(s) still call Firestore: ` +
+      firestoreUsers.slice(0, 3).join(", ")
+  );
+}
+
+// And the source must not import it either — the bundle would only be clean
+// because the import happened to be tree-shaken.
+const srcDir = path.join(root, "src");
+const firestoreImports = [];
+for (const file of await walk(srcDir)) {
+  if (!/\.(ts|tsx)$/.test(file.rel)) continue;
+  const contents = readFileSync(file.path, "utf8");
+  if (/from\s+"firebase\/firestore"/.test(contents)) firestoreImports.push(file.rel);
+}
+if (firestoreImports.length > 0) {
+  fail(`source still imports firebase/firestore: ${firestoreImports.join(", ")}`);
+}
+
+// If Firestore is ever used again, the shipped rules have to say what may be
+// read — absent rules mean the project's console settings are the only thing
+// protecting customer data.
+const rulesPath = path.join(root, "deploy", "cpanel", "firestore.rules");
+if (!existsSync(rulesPath)) {
+  warn("deploy/cpanel/firestore.rules is missing — publish rules before going live");
 }
 
 // Development tooling must not reach a production web root.

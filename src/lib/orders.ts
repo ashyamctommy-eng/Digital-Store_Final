@@ -1,15 +1,5 @@
 "use client";
 
-import {
-  collection,
-  addDoc,
-  getDocs,
-  query,
-  where,
-  orderBy,
-  Timestamp,
-} from "firebase/firestore";
-import { db } from "./firestore";
 import { CartItem } from "@/context/CartContext";
 
 /**
@@ -90,33 +80,20 @@ export interface StoredOrder {
   createdAt?: Date;
 }
 
-/** Saves an order to the `orders` collection. */
-export async function saveOrder(order: Order): Promise<string> {
-  const docRef = await addDoc(collection(db, "orders"), {
-    ...order,
-    createdAt: Timestamp.now(),
-  });
-  return docRef.id;
-}
-
-/** All orders for a user, newest first. */
-export async function getUserOrders(userId: string): Promise<OrderWithId[]> {
-  const q = query(
-    collection(db, "orders"),
-    where("userId", "==", userId),
-    orderBy("createdAt", "desc")
-  );
-
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map((doc) => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      ...data,
-      createdAt: data.createdAt?.toDate() || new Date(),
-    } as OrderWithId;
-  });
-}
+/*
+ * Orders are NOT written to Firestore any more.
+ *
+ * There used to be a browser-side mirror written at checkout (`saveOrder`) and a
+ * matching per-user read (`getUserOrders`). That made the browser a source of
+ * order records: the admin console listed those documents rather than the ledger
+ * the payment webhooks wrote, so the two could disagree and a buyer could forge
+ * a row. The PHP ledger (server/api/lib/store.php) is now the only order store,
+ * and admin screens read it through /api/admin/orders.
+ *
+ * Buyer-side history still works: each order's retrieval token is kept in this
+ * browser (see lib/orderStore.ts), which is what the account page and the order
+ * details modal use.
+ */
 
 /** Extracts a Firebase error code from an unknown thrown value. */
 export function errorCode(err: unknown): string {

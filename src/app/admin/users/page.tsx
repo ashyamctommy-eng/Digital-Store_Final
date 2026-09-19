@@ -1,11 +1,10 @@
 "use client";
+
 import { useState, useEffect } from "react";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
-import { db } from "@/lib/firestore";
+import { adminListOrders } from "@/lib/adminApi";
 import { formatPrice } from "@/lib/currency";
 
-export default function UsersPage() {
-  interface CustomerRow {
+interface CustomerRow {
   id: string;
   name: string;
   email: string;
@@ -13,17 +12,47 @@ export default function UsersPage() {
   spent: number;
 }
 
-const [users, setUsers] = useState<CustomerRow[]>([]);
+export default function AdminUsersPage() {
+  const [users, setUsers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  /*
+   * Grouped from the real ledger, through the admin API.
+   *
+   * Keyed on the buyer's email rather than a user id: most purchases are made
+   * without signing in, so an email is all the store actually knows about a
+   * customer. Ordering by a user id meant guests were dropped entirely.
+   *
+   * "Spent" counts orders that reached paid or delivered — pending and failed
+   * orders are not revenue.
+   */
   useEffect(() => {
     async function load() {
-      try {
-        const snap = await getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc")));
+      const res = await adminListOrders({ limit: 1000 });
+      if (res.ok && res.data) {
         const map = new Map<string, CustomerRow>();
-        snap.docs.forEach(d => { const data = d.data(); if (data.userId && !map.has(data.userId)) map.set(data.userId, { id: data.userId, name: data.userName||"Unknown", email: data.userEmail||"—", orders: 0, spent: 0 }); if (data.userId) { const u = map.get(data.userId)!; u.orders++; u.spent += data.totalAmount||0; }});
-        setUsers(Array.from(map.values()));
-      } catch (e) { console.error(e); }
+        for (const order of res.data.orders) {
+          const email = (order.buyer_email ?? "").trim().toLowerCase();
+          const key = email || "unknown";
+
+          if (!map.has(key)) {
+            map.set(key, {
+              id: key,
+              name: (order.buyer_name as string) || "—",
+              email: email || "—",
+              orders: 0,
+              spent: 0,
+            });
+          }
+
+          const row = map.get(key)!;
+          row.orders += 1;
+          if (order.status === "paid" || order.status === "delivered") {
+            row.spent += Number(order.amount_usd ?? 0);
+          }
+        }
+        setUsers(Array.from(map.values()).sort((a, b) => b.spent - a.spent));
+      }
       setLoading(false);
     }
     load();

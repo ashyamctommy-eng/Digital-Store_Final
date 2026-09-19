@@ -8,7 +8,6 @@ import { useWallet } from "@/context/WalletContext";
 import { useCurrency } from "@/context/CurrencyContext";
 import { useStock } from "@/context/StockContext";
 import type { DeliveryDetails } from "@/lib/orders";
-import { saveOrder } from "@/lib/orders";
 import {
   buildAccountReference,
   buildOrderId,
@@ -20,7 +19,7 @@ import {
   type DeliveredCredential,
   type OrderStatus,
 } from "@/lib/payments";
-import { formatKES, GATEWAYS, type GatewayId } from "@/lib/currency";
+import { formatKES, GATEWAYS } from "@/lib/currency";
 import { upsertOrder, patchOrder } from "@/lib/orderStore";
 import { DELIVERY, SUPPORT } from "@/lib/config";
 import PalplusModal from "./PalplusModal";
@@ -75,36 +74,14 @@ export default function CheckoutOptions({
   );
 
   /** Mirrors the order into Firestore. Fire-and-forget by design. */
-  const persist = (
-    gatewayId: GatewayId | "Wallet" | "WhatsApp",
-    reference: string,
-    status: "pending" | "paid"
-  ): void => {
-    void saveOrder({
-      orderId: orderIds.orderId,
-      accountReference: orderIds.accountReference,
-      userId: user?.uid ?? "guest",
-      userEmail: user?.email ?? details.email,
-      userName: user?.displayName ?? details.fullName,
-      items,
-      amountUsd,
-      displayCurrency: currency,
-      displayAmount: currency === "KES" ? amountKes : amountUsd,
-      delivery: details,
-      paymentMethod:
-        gatewayId === "palplus"
-          ? GATEWAYS.palplus.name
-          : gatewayId === "nowpayments"
-            ? GATEWAYS.nowpayments.name
-            : gatewayId,
-      paymentReference: reference,
-      status,
-    } as Parameters<typeof saveOrder>[0]).catch((err) => {
-      console.error("Could not mirror order to Firestore:", err);
-    });
-  };
-
-  /** Records the order locally so Order History can list and reopen it. */
+  /**
+   * The buyer's own copy, kept in this browser.
+   *
+   * It is what makes Order History and the credentials modal work without an
+   * account: the record holds the order's retrieval token, which is the only
+   * thing that can unlock the credentials. Server-side records are written by
+   * the checkout endpoints; this is the client's receipt, not the ledger.
+   */
   const recordLocally = useCallback(
     (opts: {
       orderId: string;
@@ -127,6 +104,16 @@ export default function CheckoutOptions({
     },
     [currency, amountKes, amountUsd, details.email, lines]
   );
+
+  /*
+   * Orders are no longer mirrored to Firestore from here.
+   *
+   * The write was fire-and-forget and its failures were swallowed, so it could
+   * silently do nothing while looking like it had worked — and because it came
+   * from the browser it was never a trustworthy record of a sale. The server
+   * ledger is written by the checkout endpoints and settled by the webhooks;
+   * admin screens read that. Nothing about the buyer's flow depends on this.
+   */
 
   /**
    * Fetches credentials, retrying briefly because dispatch runs just after the
@@ -212,7 +199,6 @@ export default function CheckoutOptions({
       setLoading(null);
       return;
     }
-    persist("Wallet", orderIds.orderId, "paid");
     finish({
       orderId: orderIds.orderId,
       token: "",
@@ -247,7 +233,6 @@ export default function CheckoutOptions({
       return;
     }
 
-    persist("nowpayments", res.data.invoice_id, "pending");
     setInvoice({ orderId: orderIds.orderId, url: res.data.invoice_url });
     // Record now so the order is recoverable even if the buyer never returns.
     recordLocally({
@@ -309,7 +294,6 @@ export default function CheckoutOptions({
     setMessage(null);
     try {
       checkoutViaWhatsApp(orderIds.orderId, items, amountUsd, details, currency);
-      persist("WhatsApp", orderIds.orderId, "pending");
       finish({
         orderId: orderIds.orderId,
         token: "",
@@ -567,8 +551,7 @@ export default function CheckoutOptions({
           items={lines}
           buyerEmail={details.email}
           defaultPhone={details.whatsapp}
-          onPaid={({ reference, token }) => {
-            persist("palplus", reference ?? orderIds.orderId, "paid");
+          onPaid={({ token }) => {
             setTimeout(() => {
               setPalplusOpen(false);
               finish({

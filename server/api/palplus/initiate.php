@@ -5,7 +5,11 @@
  * Starts an M-Pesa STK push through Palplus and records the order in our
  * ledger. The Palplus API key never leaves this server.
  *
- * Request  { orderId, accountReference, amountKes, phone, transactionDesc }
+ * Request  { orderId, accountReference, amountKes, phone, transactionDesc, items }
+ *
+ * `amountKes` is treated as the amount the CUSTOMER WAS SHOWN, not as the price.
+ * The charge is computed from the catalog (lib/pricing.php); the two must agree
+ * within rounding, or the order is refused.
  * Response { order_id, transaction_id, status, message }
  */
 
@@ -15,6 +19,7 @@ require_once __DIR__ . '/../lib/http.php';
 require_once __DIR__ . '/../lib/store.php';
 require_once __DIR__ . '/../lib/palplus.php';
 require_once __DIR__ . '/../lib/dispatch.php';
+require_once __DIR__ . '/../lib/pricing.php';
 
 $config = load_config();
 apply_cors($config);
@@ -32,12 +37,15 @@ $body = read_json_body();
 
 $orderId = clean_str($body['orderId'] ?? '', 96);
 $accountRef = clean_str($body['accountReference'] ?? '', 12);
-$amountKes = (int) ($body['amountKes'] ?? 0);
+$clientAmountKes = (int) ($body['amountKes'] ?? 0);
 $phoneRaw = clean_str($body['phone'] ?? '', 20);
 $desc = clean_str($body['transactionDesc'] ?? 'Order payment', 13);
 // Cart lines, used later to claim stock. Normalised so a malformed payload
 // cannot inject a path or a negative quantity into the ledger.
 $items = dispatch_normalise_items($body['items'] ?? []);
+// Each line records the price it was sold at, so the order stays auditable
+// after a catalog price change.
+$items = pricing_describe_items($items);
 $buyerEmail = clean_str($body['buyerEmail'] ?? '', 190);
 // Unguessable token: the buyer needs it to read their credentials later.
 // Generated once; an existing order keeps the token it already handed out.
@@ -49,8 +57,29 @@ if ($orderId === '') {
 if ($accountRef === '') {
     json_error('accountReference is required.', 422, 'MISSING_ACCOUNT_REFERENCE');
 }
-if ($amountKes < 1) {
-    json_error('amountKes must be at least 1.', 422, 'INVALID_AMOUNT');
+if ($items === []) {
+    json_error('This order has no items.', 422, 'EMPTY_CART');
+}
+pricing_require_known_products($items);
+
+// The price is OURS. `amountKes` from the browser is only what the customer was
+// shown, so it is a check on us, never a source of truth.
+$amountKes = pricing_total_kes($config, $items);
+if ($amountKes === null || $amountKes < 1) {
+    json_error('Could not price this order. Please refresh and try again.', 422, 'PRICING_FAILED');
+}
+if ($clientAmountKes > 0 && abs($clientAmountKes - $amountKes) > 1) {
+    // Deliberate tampering, or the price changed while they were on the page.
+    store_log($config, 'palplus.initiate.price_mismatch', [
+        'order_id' => $orderId,
+        'client_amount_kes' => $clientAmountKes,
+        'server_amount_kes' => $amountKes,
+    ]);
+    json_error(
+        'The order total changed. Please refresh the page and try again.',
+        409,
+        'PRICE_MISMATCH'
+    );
 }
 
 $maxAmount = (int) config_value($config, 'max_kes_amount', 0);
@@ -89,6 +118,7 @@ $order = array_merge($existing ?? [], [
     'account_reference' => $accountRef,
     'gateway' => 'palplus',
     'amount_kes' => $amountKes,
+    'amount_usd' => pricing_total_usd($items),
     'currency' => 'KES',
     'phone' => $phone,
     'status' => 'pending',

@@ -31,9 +31,14 @@ This is **Digital Hub Shop**, a static-exported digital products marketplace
   reference maps back to it.
 - Palplus webhooks are unsigned — verify by re-fetching the transaction from the
   Palplus API, never by trusting the payload.
-- Order persistence is fire-and-forget. Never `await` a Firestore write on the
-  path between "customer clicked pay" and "gateway redirect" — it stalled
-  checkout once already.
+- The server prices every order from the catalog (`server/api/lib/pricing.php`).
+  Never accept an amount from the request body as the price: the browser sends
+  `amountKes`/`priceUsd` only as the figure the customer was shown, and the two
+  must agree or the order is refused. Both webhooks re-derive the expected amount
+  from the catalog for the same reason.
+- Order persistence is fire-and-forget for anything that is not the ledger: never
+  `await` a non-essential write between "customer clicked pay" and "gateway
+  redirect" — it stalled checkout once already.
 
 ### Inventory & dispatch
 

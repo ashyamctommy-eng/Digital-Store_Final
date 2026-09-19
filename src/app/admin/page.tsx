@@ -1,10 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
-import { db } from "@/lib/firestore";
 import { formatPrice } from "@/lib/currency";
-import type { StoredOrder } from "@/lib/orders";
+import { adminListOrders } from "@/lib/adminApi";
+import { toAdminOrderView, type AdminOrderView } from "@/lib/adminOrders";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState([
@@ -13,30 +12,28 @@ export default function AdminDashboard() {
     { label: "Customers", value: "—", color: "text-purple-600 bg-purple-50", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" },
     { label: "Awaiting Delivery", value: "0", color: "text-amber-600 bg-amber-50", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
   ]);
-  const [recentOrders, setRecentOrders] = useState<StoredOrder[]>([]);
+  const [recentOrders, setRecentOrders] = useState<AdminOrderView[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Reads the real ledger through the admin API, not a browser-written copy:
+  // the revenue and order figures have to come from the same records that
+  // fulfilment acted on.
   useEffect(() => {
     async function load() {
-      try {
-        const snap = await getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc"), limit(10)));
-        const orders: StoredOrder[] = snap.docs.map((d) => ({
-          ...(d.data() as Omit<StoredOrder, "id">),
-          id: d.id,
-          createdAt: d.data().createdAt?.toDate(),
-        }));
-        setRecentOrders(orders);
-        const rev = orders.reduce((sum, o) => sum + (o.amountUsd || 0), 0);
-        const pend = orders.filter(
-          (o) => o.status === "pending" || o.status === "paid"
-        ).length;
-        setStats((p) => [
-          { ...p[0], value: formatPrice(rev, "USD") },
-          { ...p[1], value: `${snap.size}` },
-          p[2],
-          { ...p[3], value: `${pend}` },
-        ]);
-      } catch (e) { console.error(e); }
+      const res = await adminListOrders({ limit: 10 });
+      if (!res.ok || !res.data) {
+        setLoading(false);
+        return;
+      }
+      const rows = res.data.orders.map(toAdminOrderView);
+      setRecentOrders(rows);
+      const pending = res.data.totals.counts.pending ?? 0;
+      setStats((p) => [
+        { ...p[0], value: formatPrice(res.data!.totals.revenue_usd, "USD") },
+        { ...p[1], value: `${res.data!.totals.scanned}` },
+        p[2],
+        { ...p[3], value: `${pending}` },
+      ]);
       setLoading(false);
     }
     load();
@@ -67,9 +64,9 @@ export default function AdminDashboard() {
                recentOrders.map((o) => (
                 <tr key={o.id} className="border-b hover:bg-gray-50/50">
                   <td className="px-4 py-3 font-mono text-[11px]">#{o.id.slice(0,8)}</td>
-                  <td className="px-4 py-3 text-xs">{o.userName || "—"}</td>
+                  <td className="px-4 py-3 text-xs">{o.buyerName || "—"}</td>
                   <td className="px-4 py-3 text-xs font-bold">{formatPrice(o.amountUsd ?? 0, "USD")}</td>
-                  <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-100">{o.paymentMethod}</span></td>
+                  <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-100">{o.gateway ?? "—"}</span></td>
                   <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${o.status==="paid"||o.status==="delivered"?"bg-green-100 text-green-700":o.status==="failed"?"bg-red-100 text-red-700":"bg-amber-100 text-amber-700"}`}>{o.status ?? "pending"}</span></td>
                 </tr>
               ))}

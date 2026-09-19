@@ -257,8 +257,8 @@ does not depend on a third party.
 
 ### Order history and credentials### Order history and credentials
 
-`/account/orders` lists orders from a local index (`dhs.orders.v1`), merged with
-Firestore for signed-in customers. The Order Details modal shows the purchased
+`/account/orders` lists orders from a local index (`dhs.orders.v1`) held in the
+buyer's own browser. The Order Details modal shows the purchased
 items, usage warnings, and a `UID | Account Data | Copy` credential table, with
 Copy-all and a `.txt` export.
 
@@ -328,10 +328,18 @@ name automatically.
   stock is empty; keep some static numbers for your best sellers.
 - Cancelling an unused on-demand number is not implemented — the provider's
   documented API v1.0 has no cancel endpoint.
-- Orders are written to two places: the PHP ledger (authoritative for payment
-  state) and Firestore (customer history). The ledger is what the UI trusts.
+- Orders live in **one** place: the PHP ledger (`server/api/lib/store.php`),
+  written by the checkout endpoints and settled by the webhooks. There is no
+  browser-written order store. The admin screens read the ledger through
+  `/api/admin/orders` (admin key), and a buyer reads their own orders through
+  their per-order token.
+- The store does not use Firestore at all. Firebase is present only for Google
+  sign-in. `deploy/cpanel/firestore.rules` denies every client read and write;
+  publish it, and do not add a collection without a rule to match.
 - Wallet balances live in `localStorage` and are deliberately **not**
   self-creditable — a client-side top-up button would let anyone mint money.
-- Admin gating is client-side; enforce `ADMIN_EMAILS` in Firestore rules too.
+- The admin **pages** are gated client-side on `ADMIN_EMAILS`, which is a
+  convenience, not a control: every admin API call independently requires the
+  admin key. Nothing sensitive is protected by the client-side check alone.
 - The Palplus `channelId` must be configured in the Palplus console (or set in
   `config.php`), otherwise the API returns `400 NO_DEFAULT_CHANNEL`.

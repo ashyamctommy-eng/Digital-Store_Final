@@ -23,6 +23,7 @@ require_once __DIR__ . '/../lib/smsotp.php';
 require_once __DIR__ . '/../lib/proxyaddr.php';
 require_once __DIR__ . '/../lib/proxycheck.php';
 require_once __DIR__ . '/../lib/settings.php';
+require_once __DIR__ . '/../lib/pricing.php';
 
 $GLOBALS['__pass'] = 0;
 $GLOBALS['__fail'] = 0;
@@ -862,6 +863,103 @@ if (is_file($settingsFile)) {
 } else {
     ok(false, 'the settings file exists');
 }
+
+/* ---------------------------------------------------------------- */
+/* ---------------------------------------------------------------- */
+section('Order pricing is decided by the server');
+
+// The store used to accept the amount from the browser body and store it on the
+// order; the webhook then compared the settled amount against that same stored
+// value, so both sides of the "tamper check" came from the client. A buyer could
+// post amountKes: 1, pay a shilling, and the check would pass. These assertions
+// pin the replacement: the price is computed from the catalog, and a request
+// that disagrees with it is refused.
+
+$priceSample = catalog_price_usd('fb-usa-01');
+ok($priceSample !== null && $priceSample > 0, 'the catalog knows what a product costs');
+eq(null, catalog_price_usd('no-such-product-xyz'), 'an unknown product has no price');
+eq(null, pricing_total_usd([]), 'an empty cart cannot be priced');
+
+$oneUnit = pricing_total_usd([['product_id' => 'fb-usa-01', 'quantity' => 1]]);
+eq(catalog_price_usd('fb-usa-01'), $oneUnit, 'one unit costs the catalog price');
+
+$twoUnits = pricing_total_usd([['product_id' => 'fb-usa-01', 'quantity' => 2]]);
+eq(round($oneUnit * 2, 2), $twoUnits, 'quantity multiplies the price');
+
+$mixed = pricing_total_usd([
+    ['product_id' => 'fb-usa-01', 'quantity' => 1],
+    ['product_id' => 'sms-whatsapp', 'quantity' => 3],
+]);
+eq(
+    round(catalog_price_usd('fb-usa-01') + catalog_price_usd('sms-whatsapp') * 3, 2),
+    $mixed,
+    'a mixed cart sums every line'
+);
+
+// The whole point: a cart containing something we cannot price must not be
+// charged at a guessed figure.
+eq(
+    null,
+    pricing_total_usd([
+        ['product_id' => 'fb-usa-01', 'quantity' => 1],
+        ['product_id' => 'invented-product', 'quantity' => 1],
+    ]),
+    'one unknown line makes the whole cart unpriceable'
+);
+
+$rateConfig = ['fx_rate_kes' => 130];
+eq(
+    (int) round(catalog_price_usd('fb-usa-01') * 130),
+    pricing_total_kes($rateConfig, [['product_id' => 'fb-usa-01', 'quantity' => 1]]),
+    'the KES charge converts at the configured rate'
+);
+
+$cheaperRate = ['fx_rate_kes' => 100];
+ok(
+    pricing_total_kes($cheaperRate, [['product_id' => 'fb-usa-01', 'quantity' => 1]])
+        < pricing_total_kes($rateConfig, [['product_id' => 'fb-usa-01', 'quantity' => 1]]),
+    'a lower configured rate charges fewer shillings'
+);
+eq(130.0, pricing_fx_rate([]), 'a missing rate falls back to the default');
+eq(130.0, pricing_fx_rate(['fx_rate_kes' => 0]), 'a zero rate is not usable and falls back');
+
+// Rounding differs between JS and PHP, so agreement is a tolerance, not equality.
+ok(pricing_amounts_agree(100.00, 100.00), 'identical totals agree');
+// Compared in whole cents, so float noise cancels but a real difference does
+// not. abs(100.00 - 100.01) is 0.010000000000005 in IEEE754 — a `<= 0.01` test
+// would wrongly reject it, which is why this is not done with a float tolerance.
+ok(pricing_amounts_agree(106.49999999, 106.50), 'float noise from a different summation order is forgiven');
+ok(!pricing_amounts_agree(100.00, 100.01), 'an exact one-cent difference is a difference');
+ok(!pricing_amounts_agree(100.00, 100.02), 'two cents is a real difference');
+ok(pricing_amounts_agree(51.00, 51.00), 'equal totals agree');
+ok(!pricing_amounts_agree(1.00, 34.50), 'a tampered price is rejected');
+ok(!pricing_amounts_agree(0.01, 51.00), 'paying a penny for a product is rejected');
+
+// Every shipped product must be priceable, or checkout would refuse a real cart.
+$unpriced = [];
+foreach (catalog_product_ids() as $pid) {
+    $p = catalog_price_usd($pid);
+    if ($p === null || $p <= 0) {
+        $unpriced[] = $pid;
+    }
+}
+eq([], $unpriced, 'every product in the catalog has a positive price');
+
+// The browser shows the customer a KES figure derived from FX_RATE_KES; the
+// server charges one derived from its own rate. If they drift apart every
+// M-Pesa checkout is refused as tampered, so the two are pinned together here.
+$currencyTs = (string) @file_get_contents(dirname(__DIR__, 3) . '/src/lib/currency.ts');
+$frontendRate = null;
+if (preg_match('/FX_RATE_KES\s*=\s*([0-9.]+)/', $currencyTs, $m) === 1) {
+    $frontendRate = (float) $m[1];
+}
+ok($frontendRate !== null, 'the frontend FX rate is findable');
+eq(
+    $frontendRate,
+    pricing_fx_rate([]),
+    'the server and frontend agree on KES per USD (a mismatch would fail every M-Pesa checkout)'
+);
+ok(count(catalog_product_ids()) > 0, 'the catalog is not empty');
 
 /* ---------------------------------------------------------------- */
 /* ---------------------------------------------------------------- */

@@ -37,6 +37,22 @@ return [
     'mode' => 'sandbox',
 
     // ---------------------------------------------------------------
+    // KES per 1 USD.
+    //
+    // Orders are priced from the catalog on the server, in USD, and this rate
+    // converts that total to the shillings actually charged. It MUST equal
+    // FX_RATE_KES in src/lib/currency.ts: the browser shows the customer one
+    // figure and the server charges another, so a mismatch makes every KES
+    // checkout fail with PRICE_MISMATCH. tests/unit.php asserts the two agree,
+    // so a drift is caught before it reaches a customer.
+    //
+    // Deliberately NOT editable from the Configurations console: changing it
+    // from the running site would silently break every M-Pesa payment until the
+    // frontend was rebuilt with the matching constant.
+    // ---------------------------------------------------------------
+    'fx_rate_kes' => 130,
+
+    // ---------------------------------------------------------------
     // Palplus — M-Pesa STK push (KES)
     // Console: https://console.palpluss.com  → Settings → API Keys
     // Keys start with pk_test_ (sandbox) or pk_live_ (live).

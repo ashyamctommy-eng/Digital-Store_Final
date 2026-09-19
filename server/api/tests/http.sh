@@ -77,9 +77,37 @@ sign_ipn() { # sign_ipn <json>
   ' "$1"
 }
 
-fire_paid_ipn() { # fire_paid_ipn <orderId> -> marks the order paid through the real webhook
+# The amount the provider reports for an order: derived from the catalog the
+# same way the invoice was raised. A hardcoded figure here would let a fixture
+# pass even when the webhook's amount check is broken — which is precisely how
+# the missing check went unnoticed.
+catalog_price_of() { # catalog_price_of <orderId>
+  "$PHP_BIN" -r '
+    require $argv[1] . "/lib/http.php";
+    require $argv[1] . "/lib/store.php";
+    require $argv[1] . "/lib/dispatch.php";
+    require $argv[1] . "/lib/pricing.php";
+    $config = load_config();
+    $order = store_read_order($config, $argv[2]);
+    $usd = $order === null
+      ? null
+      : pricing_total_usd(dispatch_normalise_items($order["items"] ?? []));
+    echo $usd === null ? "0" : rtrim(rtrim(number_format($usd, 2, ".", ""), "0"), ".");
+  ' "$API_DIR" "$1" 2>/dev/null || echo 0
+}
+
+fire_ipn_with_amount() { # fire_ipn_with_amount <orderId> <priceAmount>
   local json sig
-  json="{\"payment_status\":\"finished\",\"order_id\":\"$1\",\"price_amount\":4.5,\"price_currency\":\"usd\"}"
+  json="{\"payment_status\":\"finished\",\"order_id\":\"$1\",\"price_amount\":$2,\"price_currency\":\"usd\"}"
+  sig="$(sign_ipn "$json")"
+  curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/nowpayments/webhook" \
+    -H 'Content-Type: application/json' -H "x-nowpayments-sig: $sig" -d "$json"
+}
+
+fire_paid_ipn() { # fire_paid_ipn <orderId> -> marks the order paid through the real webhook
+  local json sig amount
+  amount="$(catalog_price_of "$1")"
+  json="{\"payment_status\":\"finished\",\"order_id\":\"$1\",\"price_amount\":${amount:-0},\"price_currency\":\"usd\"}"
   sig="$(sign_ipn "$json")"
   curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/nowpayments/webhook" \
     -H 'Content-Type: application/json' -H "x-nowpayments-sig: $sig" -d "$json"
@@ -112,7 +140,9 @@ return [
     'admin_api_key' => 'test-admin-key',
     'inventory_drives_stock' => true,
     'palplus' => ['api_key' => 'pk_test_fake', 'sandbox_base' => 'https://sandbox.palplus.invalid/v1'],
-    'nowpayments' => ['api_key' => '', 'ipn_secret' => 'ipn-secret-123', 'api_base' => 'https://api.nowpayments.invalid/v1'],
+    // A fake key so the pricing checks are reachable: the `configured` gate runs
+    // before them by design, so an unconfigured gateway would mask the result.
+    'nowpayments' => ['api_key' => 'np_test_fake', 'ipn_secret' => 'ipn-secret-123', 'api_base' => 'https://api.nowpayments.invalid/v1'],
     'resend' => ['api_key' => '', 'from' => 'Test <t@example.test>'],
     'proxycheck' => [
         // The reflector and the proxies are all on localhost here, so private
@@ -684,10 +714,112 @@ check_contains "reports the key is accepted" 'API key is accepted' "$(cat /tmp/d
 check_contains "and shows the balance" 'Balance can cover the minimum' "$(cat /tmp/dhs-r.json)"
 
 # An integration with no key must say so rather than fail obscurely.
+# (Resend is the one left unconfigured: the gateways carry fake keys so the
+# pricing checks below are reachable at all.)
 CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings/test" \
-  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' -d '{"integration":"nowpayments"}')
-check "testing an unconfigured gateway -> 200" "200" "$CODE"
-check_contains "explains that the key is missing" 'No NOWPayments API key is set' "$(cat /tmp/dhs-r.json)"
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' -d '{"integration":"resend"}')
+check "testing an unconfigured integration -> 200" "200" "$CODE"
+check_contains "explains that the key is missing" 'No Resend API key is set' "$(cat /tmp/dhs-r.json)"
+
+
+echo
+echo -e "\033[1mPrice tampering\033[0m"
+
+# The store used to take the price from the request body and store it on the
+# order, and the Palplus webhook compared the settled amount against that same
+# stored value — so the "tamper check" compared a number with itself and a buyer
+# could pay whatever they liked. NOWPayments had no amount check at all. These
+# tests pin the replacement: the charge comes from the server's own catalog.
+
+# A cart of proxy-dc-03 costs $17 in the catalog.
+CHEAP_ORDER="ORDER_proxy-dc-03_tamper1"
+"$PHP_BIN" -r '
+  require $argv[1] . "/lib/http.php";
+  require $argv[1] . "/lib/store.php";
+  require $argv[1] . "/lib/dispatch.php";
+  $config = ["data_dir" => $argv[2]];
+  $num = 0;
+  inventory_add_units($config, "proxy-dc-03", "203.0.11.1:9000:u:p", $num);
+  store_write_order($config, [
+    "order_id" => $argv[3], "order_token" => "tok_tamper", "status" => "pending",
+    "gateway" => "nowpayments", "amount_usd" => 17, "currency" => "USD",
+    "buyer_email" => "tamper@example.test",
+    "items" => [["product_id" => "proxy-dc-03", "name" => "Datacenter Proxies", "quantity" => 1]],
+  ]);' "$API_DIR" "$DATA_DIR" "$CHEAP_ORDER"
+
+# The provider reports a price that does not match the catalog.
+CODE=$(fire_ipn_with_amount "$CHEAP_ORDER" 0.01)
+check "a settled amount below the catalog price -> 200 but rejected" "200" "$CODE"
+check_contains "the webhook names the mismatch" '"rejected":"amount mismatch"' "$(cat /tmp/dhs-r.json)"
+
+TAMPER_STATE=$("$PHP_BIN" -r '
+  require $argv[1] . "/lib/http.php";
+  require $argv[1] . "/lib/store.php";
+  $o = store_read_order(["data_dir" => $argv[2]], $argv[3]);
+  echo ($o["status"] ?? "") . "|" . ($o["failure_reason"] ?? "");' "$API_DIR" "$DATA_DIR" "$CHEAP_ORDER")
+check "the underpaid order is failed, not fulfilled" "failed|amount_mismatch" "$TAMPER_STATE"
+
+NO_GOODS=$(curl -s "$BASE/orders/credentials?orderId=$CHEAP_ORDER&token=tok_tamper" \
+  | "$PHP_BIN" -r '$d = json_decode((string) stream_get_contents(STDIN), true); echo count($d["credentials"] ?? []);')
+check "nothing is delivered for an underpaid order" "0" "$NO_GOODS"
+
+# Paying the catalog price still settles it, so the check is not simply refusing
+# every crypto order.
+HONEST_ORDER="ORDER_proxy-dc-03_honest1"
+"$PHP_BIN" -r '
+  require $argv[1] . "/lib/http.php";
+  require $argv[1] . "/lib/store.php";
+  $config = ["data_dir" => $argv[2]];
+  store_write_order($config, [
+    "order_id" => $argv[3], "order_token" => "tok_honest", "status" => "pending",
+    "gateway" => "nowpayments", "amount_usd" => 17, "currency" => "USD",
+    "buyer_email" => "honest@example.test",
+    "items" => [["product_id" => "proxy-dc-03", "name" => "Datacenter Proxies", "quantity" => 1]],
+  ]);' "$API_DIR" "$DATA_DIR" "$HONEST_ORDER"
+
+fire_paid_ipn "$HONEST_ORDER" >/dev/null
+HONEST_STATE=$("$PHP_BIN" -r '
+  require $argv[1] . "/lib/http.php";
+  require $argv[1] . "/lib/store.php";
+  $o = store_read_order(["data_dir" => $argv[2]], $argv[3]);
+  echo ($o["status"] ?? "");' "$API_DIR" "$DATA_DIR" "$HONEST_ORDER")
+check "the correct amount still settles" "paid" "$HONEST_STATE"
+
+# The checkout endpoints refuse a cart priced differently from the catalog,
+# BEFORE they talk to a provider or record anything.
+TAMPER_CART='{"orderId":"ORDER_tamper_1","accountReference":"DHSTAMPER001","amountKes":1,"phone":"0712345678","items":[{"product_id":"proxy-dc-03","name":"Datacenter Proxies","quantity":1}]}'
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/palplus/initiate" \
+  -H 'Content-Type: application/json' -d "$TAMPER_CART")
+check "Palplus: a one-shilling cart is refused" "409" "$CODE"
+check_contains "with a price-mismatch code" '"errorCode":"PRICE_MISMATCH"' "$(cat /tmp/dhs-r.json)"
+check_absent "and no order was recorded" "ORDER_tamper_1" \
+  "$(curl -s "$BASE/inventory/counts" | head -c 0; ls "$DATA_DIR" 2>/dev/null | grep -c 'ORDER_tamper_1' || true)"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/nowpayments/create-invoice" \
+  -H 'Content-Type: application/json' \
+  -d '{"orderId":"ORDER_tamper_2","priceUsd":0.01,"items":[{"product_id":"proxy-dc-03","name":"Datacenter Proxies","quantity":1}]}')
+check "NOWPayments: a one-cent invoice is refused" "409" "$CODE"
+check_contains "with a price-mismatch code" '"errorCode":"PRICE_MISMATCH"' "$(cat /tmp/dhs-r.json)"
+
+# A cart the server cannot price is refused outright rather than guessed at.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/palplus/initiate" \
+  -H 'Content-Type: application/json' \
+  -d '{"orderId":"ORDER_tamper_3","accountReference":"DHSTAMPER003","amountKes":100,"phone":"0712345678","items":[{"product_id":"invented-product","name":"Nope","quantity":1}]}')
+check "an unpriceable product is refused" "422" "$CODE"
+check_contains "and says so" '"errorCode":"UNKNOWN_PRODUCT"' "$(cat /tmp/dhs-r.json)"
+
+# An empty cart is not free.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/nowpayments/create-invoice" \
+  -H 'Content-Type: application/json' -d '{"orderId":"ORDER_tamper_4","priceUsd":5,"items":[]}')
+check "an empty cart is refused" "422" "$CODE"
+check_contains "as an empty cart" '"errorCode":"EMPTY_CART"' "$(cat /tmp/dhs-r.json)"
+
+# The honest price must get past the tamper check (it then fails on the
+# unreachable test gateway, which is a different, expected error).
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/nowpayments/create-invoice" \
+  -H 'Content-Type: application/json' \
+  -d '{"orderId":"ORDER_tamper_5","priceUsd":17.00,"items":[{"product_id":"proxy-dc-03","name":"Datacenter Proxies","quantity":1}]}')
+check_absent "the matching price is not refused as tampering" '"errorCode":"PRICE_MISMATCH"' "$(cat /tmp/dhs-r.json)"
 
 echo
 echo -e "\033[1mSummary\033[0m"

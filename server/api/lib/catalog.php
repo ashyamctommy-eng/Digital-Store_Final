@@ -62,6 +62,41 @@ const CATALOG_PROXY_PRODUCTS = [
     ],
 ];
 
+/**
+ * product_id => base price in USD.
+ *
+ * This exists so the SERVER can compute what an order costs. The browser sends
+ * a price for display, but the checkout endpoints price the cart from this
+ * table instead — otherwise a buyer could post amountUsd: 0.01 and have the
+ * webhook confirm a payment that matched the price they chose themselves.
+ *
+ * Note KV pairs are reversed (JS needs quoting); PHP consts work the same way.
+ */
+const CATALOG_PRICES = [
+    'fb-usa-01' => 51,
+    'fb-uk-02' => 48.5,
+    'fb-ng-03' => 29,
+    'fb-de-04' => 50,
+    'ig-5k-01' => 68.5,
+    'ig-1k-02' => 40,
+    'ig-aged-03' => 22.5,
+    'tiktok-600' => 52,
+    'tiktok-1k' => 81,
+    'tiktok-mon-01' => 188.5,
+    'sms-whatsapp' => 4.5,
+    'sms-telegram' => 4.2,
+    'sms-facebook' => 4.2,
+    'sms-google' => 3.5,
+    'sms-tiktok' => 3.5,
+    'vpn-nord-1y' => 34.5,
+    'vpn-surf-6m' => 20,
+    'vpn-express-1y' => 47.5,
+    'proxy-9p-10' => 46,
+    'proxy-rot-01' => 26,
+    'proxy-mobile-02' => 55.5,
+    'proxy-dc-03' => 17,
+];
+
 /** The delivery kind recorded in the catalog, or null for an unknown product. */
 function catalog_delivery_kind(string $productId): ?string
 {
@@ -108,4 +143,16 @@ function catalog_sms_product_ids(): array
 function catalog_proxy_product_ids(): array
 {
     return array_keys(CATALOG_PROXY_PRODUCTS);
+}
+
+/** Base price in USD for a product, or null when the product is unknown. */
+function catalog_price_usd(string $productId): ?float
+{
+    return isset(CATALOG_PRICES[$productId]) ? (float) CATALOG_PRICES[$productId] : null;
+}
+
+/** Every product id the server can price. */
+function catalog_product_ids(): array
+{
+    return array_keys(CATALOG_PRICES);
 }

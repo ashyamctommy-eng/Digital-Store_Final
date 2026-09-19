@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useOrders, type LocalOrder } from "@/lib/orderStore";
-import { getUserOrders, type OrderWithId } from "@/lib/orders";
-import { fetchCredentials, type OrderStatus } from "@/lib/payments";
+import { fetchCredentials } from "@/lib/payments";
 import { downloadOrderText } from "@/lib/orderText";
 import OrderDetailsModal from "@/components/OrderDetailsModal";
 import Icon from "@/components/ui/Icon";
@@ -28,74 +27,37 @@ const STATUS_TONE: Record<string, string> = {
   unknown: "bg-[var(--color-ink-faint)]/15 text-[var(--color-ink-soft)]",
 };
 
-/** Maps a Firestore order into the local shape so both can share one table. */
-function fromFirestore(o: OrderWithId): LocalOrder {
-  const rawStatus = String(o.status ?? "pending");
-  const status: OrderStatus =
-    rawStatus === "delivered"
-      ? "paid"
-      : rawStatus === "refunded"
-        ? "cancelled"
-        : (rawStatus as OrderStatus);
-
-  return {
-    orderId: o.orderId ?? o.id,
-    // Firestore never stores the retrieval token; the modal explains that.
-    token: "",
-    createdAt:
-      o.createdAt instanceof Date ? o.createdAt.toISOString() : new Date().toISOString(),
-    status,
-    paymentMethod: o.paymentMethod ?? "—",
-    currency: o.displayCurrency ?? "USD",
-    amount: o.displayAmount ?? o.amountUsd ?? 0,
-    amountUsd: o.amountUsd ?? 0,
-    buyerEmail: o.delivery?.email ?? o.userEmail ?? "",
-    items: (o.items ?? []).map((i) => ({
-      product_id: i.id,
-      name: i.name,
-      quantity: i.quantity,
-    })),
-  };
-}
 
 export default function OrderHistoryPage() {
   const { user, loading: authLoading } = useAuth();
   const { orders: localOrders, remove } = useOrders();
 
-  const [cloudOrders, setCloudOrders] = useState<LocalOrder[]>([]);
-  const [query, setQuery] = useState("");
+const [query, setQuery] = useState("");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openOrder, setOpenOrder] = useState<LocalOrder | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
 
-  // Signed-in customers also have a copy in Firestore, which is what makes
-  // history follow them to a new device.
-  useEffect(() => {
-    if (authLoading || !user) return;
-    let cancelled = false;
-    getUserOrders(user.uid)
-      .then((rows) => {
-        if (!cancelled) setCloudOrders(rows.map(fromFirestore));
-      })
-      .catch(() => {
-        /* offline or rules deny — the local list still works */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user, authLoading]);
+  /*
+   * There used to be a Firestore copy of a signed-in customer's orders here, so
+   * history followed them to a new device. It was removed along with the rest of
+   * the browser-written order store: the documents were written by the client,
+   * were a different list from the ledger the webhooks settle, and were already
+   * unreadable under the project's security rules — so the fallback below was
+   * what actually ran. Every order still carries its retrieval token in this
+   * browser, which is what makes the credentials readable and what the order
+   * details modal uses.
+   */
 
-  const allOrders = useMemo(() => {
-    // Local records win: they carry the retrieval token and the live status.
-    const byId = new Map<string, LocalOrder>();
-    for (const o of cloudOrders) byId.set(o.orderId, o);
-    for (const o of localOrders) byId.set(o.orderId, o);
-    return Array.from(byId.values()).sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-  }, [localOrders, cloudOrders]);
+  const allOrders = useMemo(
+    () =>
+      [...localOrders].sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      ),
+    [localOrders]
+  );
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

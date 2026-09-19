@@ -75,17 +75,29 @@ function parseProxy(block, id) {
 function parseCatalog(source) {
   const sms = [];
   const proxies = [];
+  const prices = [];
 
   for (const block of productBlocks(source)) {
     const id = fieldOf(block, "id");
     if (!id) continue;
+
+    // Every product needs a server-side price. The browser must never be the
+    // one that decides what a thing costs: a checkout endpoint that trusts a
+    // posted amount lets a buyer pay whatever they like.
+    const price = Number.parseFloat(
+      block.match(/price_usd:\s*([\d.]+)/)?.[1] ?? ""
+    );
+    if (!Number.isFinite(price) || price <= 0) {
+      throw new Error(`Product "${id}" has no usable price_usd.`);
+    }
+    prices.push({ id, price_usd: price, name: fieldOf(block, "name") ?? id });
 
     const kind = block.match(/delivery_kind:\s*"([^"]+)"/)?.[1];
     if (kind === "sms") sms.push({ id, ...parseSms(block, id) });
     else if (kind === "proxy") proxies.push({ id, ...parseProxy(block, id) });
   }
 
-  return { sms, proxies };
+  return { sms, proxies, prices };
 }
 
 const esc = (value) => String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
@@ -103,6 +115,12 @@ function smsEntries(rows) {
     .join("\n");
 }
 
+function priceEntries(rows) {
+  return rows
+    .map((r) => `    '${esc(r.id)}' => ${r.price_usd},`)
+    .join("\n");
+}
+
 function proxyEntries(rows) {
   return rows
     .map(
@@ -115,7 +133,7 @@ function proxyEntries(rows) {
 }
 
 const source = await readFile(SRC, "utf8");
-const { sms, proxies } = parseCatalog(source);
+const { sms, proxies, prices } = parseCatalog(source);
 
 const php = `<?php
 /**
@@ -139,6 +157,20 @@ ${smsEntries(sms)}
 /** product_id => pool spec, for delivery_kind "proxy" products. */
 const CATALOG_PROXY_PRODUCTS = [
 ${proxyEntries(proxies)}
+];
+
+/**
+ * product_id => base price in USD.
+ *
+ * This exists so the SERVER can compute what an order costs. The browser sends
+ * a price for display, but the checkout endpoints price the cart from this
+ * table instead — otherwise a buyer could post amountUsd: 0.01 and have the
+ * webhook confirm a payment that matched the price they chose themselves.
+ *
+ * Note KV pairs are reversed (JS needs quoting); PHP consts work the same way.
+ */
+const CATALOG_PRICES = [
+${priceEntries(prices).replace(/'(\S+)' => /g, "'$1' => ")}
 ];
 
 /** The delivery kind recorded in the catalog, or null for an unknown product. */
@@ -188,11 +220,28 @@ function catalog_proxy_product_ids(): array
 {
     return array_keys(CATALOG_PROXY_PRODUCTS);
 }
+
+/** Base price in USD for a product, or null when the product is unknown. */
+function catalog_price_usd(string $productId): ?float
+{
+    return isset(CATALOG_PRICES[$productId]) ? (float) CATALOG_PRICES[$productId] : null;
+}
+
+/** Every product id the server can price. */
+function catalog_product_ids(): array
+{
+    return array_keys(CATALOG_PRICES);
+}
 `;
 
 await writeFile(OUT, php);
 
-console.log(`  synced ${sms.length} SMS + ${proxies.length} proxy product(s) -> server/api/lib/catalog.php`);
+console.log(
+  `  synced ${prices.length} priced product(s) (${sms.length} SMS, ${proxies.length} proxy) -> server/api/lib/catalog.php`
+);
+for (const r of prices) {
+  console.log(`    price  ${r.id.padEnd(16)} \$${r.price_usd.toFixed(2)}`);
+}
 for (const r of sms) {
   console.log(`    sms    ${r.id.padEnd(16)} ${r.label} (service ${r.service_id}, country ${r.country_id})`);
 }
