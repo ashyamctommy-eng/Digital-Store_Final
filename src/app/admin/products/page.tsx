@@ -1,92 +1,440 @@
 "use client";
-import { useState, useRef } from "react";
-import { products as initialProducts, Product } from "@/lib/products";
 
-export default function ProductsPage() {
+import { useMemo, useRef, useState } from "react";
+import { products as initialProducts, type Product } from "@/lib/products";
+import { categories, getCategory } from "@/lib/categories";
+import { COMMERCE } from "@/lib/config";
+import { formatPrice, stockLabel } from "@/lib/format";
+import { asset } from "@/lib/asset";
+import Icon from "@/components/ui/Icon";
+
+const blankForm = {
+  name: "",
+  category: categories[0].id,
+  price: "",
+  original_price: "",
+  stock: "50",
+  country_flags: "🌐",
+  description: "",
+  specs: "",
+  guide_url: "",
+  badge: "",
+  image: "",
+  delivery: "Instant",
+};
+
+type FormState = typeof blankForm;
+
+export default function AdminProductsPage() {
   const [list, setList] = useState<Product[]>(initialProducts);
   const [editing, setEditing] = useState<Product | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", team: "", price: "", originalPrice: "", category: "", description: "", badge: "", image: "", backImage: "", modelUrl: "", sizes: "S,M,L,XL,XXL" });
+  const [form, setForm] = useState<FormState>(blankForm);
+  const [query, setQuery] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const backFileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, field: "image" | "backImage") => {
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((p) =>
+      `${p.name} ${p.category} ${p.id}`.toLowerCase().includes(q)
+    );
+  }, [list, query]);
+
+  const openNew = () => {
+    setForm(blankForm);
+    setEditing(null);
+    setShowForm(true);
+  };
+
+  const openEdit = (p: Product) => {
+    setForm({
+      name: p.name,
+      category: p.category,
+      price: String(p.price),
+      original_price: p.original_price ? String(p.original_price) : "",
+      stock: String(p.stock),
+      country_flags: p.country_flags,
+      description: p.description,
+      specs: p.specs.join("\n"),
+      guide_url: p.guide_url,
+      badge: p.badge ?? "",
+      image: p.image,
+      delivery: p.delivery ?? "Instant",
+    });
+    setEditing(p);
+    setShowForm(true);
+  };
+
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onloadend = () => {
-      setForm(prev => ({ ...prev, [field]: reader.result as string }));
-    };
+    reader.onloadend = () =>
+      setForm((prev) => ({ ...prev, image: reader.result as string }));
     reader.readAsDataURL(file);
   };
 
-  const openNew = () => { setForm({ name: "", team: "", price: "", originalPrice: "", category: "", description: "", badge: "", image: "", backImage: "", modelUrl: "", sizes: "S,M,L,XL,XXL" }); setEditing(null); setShowForm(true); };
-  const openEdit = (p: Product) => { setForm({ name: p.name, team: p.team, price: String(p.price), originalPrice: String(p.originalPrice||""), category: p.category, description: p.description, badge: p.badge||"", image: p.images[0], backImage: p.backImage||"", modelUrl: p.modelUrl||"", sizes: p.sizes.join(",") }); setEditing(p); setShowForm(true); };
-
   const handleSave = () => {
-    const np: Product = { id: editing?.id||Date.now(), slug: editing?.slug||form.name.toLowerCase().replace(/[^a-z0-9]+/g,"-"), name: form.name, team: form.team, price: parseFloat(form.price)||0, originalPrice: form.originalPrice?parseFloat(form.originalPrice):undefined, images: [form.image||"https://placehold.co/400x500/333/fff?text=Product"], backImage: form.backImage||undefined, modelUrl: form.modelUrl||undefined, badge: (form.badge as any)||undefined, description: form.description, details: ["Premium quality","Official merchandise"], sizes: form.sizes.split(",").map(s=>s.trim()), category: form.category };
-    if (editing) { setList(p=>p.map(x=>x.id===editing.id?np:x)); } else { setList(p=>[...p,np]); }
+    const name = form.name.trim();
+    if (!name) return;
+
+    const next: Product = {
+      id: editing?.id ?? `custom-${Date.now()}`,
+      slug: editing?.slug ?? name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""),
+      name,
+      category: form.category,
+      country_flags: form.country_flags || "🌐",
+      price: parseFloat(form.price) || 0,
+      original_price: form.original_price ? parseFloat(form.original_price) : undefined,
+      currency: COMMERCE.currency,
+      image: form.image || "/assets/images/proxy-logo.svg",
+      stock: parseInt(form.stock, 10) || 0,
+      description: form.description,
+      specs: form.specs
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+      guide_url: form.guide_url,
+      badge: (form.badge as Product["badge"]) || undefined,
+      delivery: form.delivery,
+    };
+
+    setList((prev) =>
+      editing ? prev.map((p) => (p.id === editing.id ? next : p)) : [next, ...prev]
+    );
     setShowForm(false);
   };
 
+  const inputClass =
+    "w-full px-3 py-2 rounded-xl border border-[var(--color-line)] bg-[var(--color-page)] text-sm outline-none focus:border-[var(--color-brand)]";
+  const labelClass =
+    "block text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-faint)] mb-1";
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div><h1 className="text-2xl font-bold">Products</h1><p className="text-sm text-gray-500 mt-1">{list.length} products</p></div>
-        <button onClick={openNew} className="bg-[var(--color-charcoal)] text-white px-4 py-2 text-xs font-bold uppercase hover:bg-[var(--color-accent)]">+ Add Product</button>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+          <h1 className="text-2xl font-extrabold">Products</h1>
+          <p className="text-sm text-[var(--color-ink-soft)] mt-0.5">
+            {list.length} digital items in the catalog
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <div className="relative">
+            <Icon
+              name="search"
+              className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-ink-faint)]"
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search catalog"
+              className="pl-9 pr-3 py-2 rounded-xl border border-[var(--color-line)] bg-[var(--color-panel)] text-sm outline-none focus:border-[var(--color-brand)] w-full sm:w-56"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={openNew}
+            className="px-4 py-2 rounded-xl bg-[var(--color-brand)] text-white text-xs font-bold uppercase tracking-wider whitespace-nowrap"
+          >
+            + Add Product
+          </button>
+        </div>
       </div>
+
+      {/* Honest persistence notice */}
+      <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-500/25 dark:bg-amber-500/10 p-3 flex items-start gap-2">
+        <Icon
+          name="shield"
+          className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5"
+        />
+        <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+          Edits here are held in memory for this session only. The catalog is
+          still a static file (<code>src/lib/products.ts</code>). Move products
+          into Firestore to persist changes — see the migration note in the repo
+          README.
+        </p>
+      </div>
+
+      {/* Form modal */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={()=>setShowForm(false)}>
-          <div className="bg-white w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-lg p-6" onClick={e=>e.stopPropagation()}>
-            <h2 className="text-lg font-bold mb-4">{editing?"Edit":"Add"} Product</h2>
+        <div
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowForm(false)}
+        >
+          <div
+            className="bg-[var(--color-panel)] w-full max-w-lg max-h-[90dvh] overflow-y-auto rounded-2xl p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-extrabold mb-4">
+              {editing ? "Edit" : "Add"} Product
+            </h2>
+
             <div className="space-y-3">
-              <input placeholder="Product Name *" value={form.name} onChange={e=>setForm({...form,name:e.target.value})} className="w-full border px-3 py-2 text-sm" />
-              <div className="grid grid-cols-2 gap-3"><input placeholder="Team *" value={form.team} onChange={e=>setForm({...form,team:e.target.value})} className="w-full border px-3 py-2 text-sm" /><input placeholder="Category" value={form.category} onChange={e=>setForm({...form,category:e.target.value})} className="w-full border px-3 py-2 text-sm" /></div>
-              <div className="grid grid-cols-2 gap-3"><input placeholder="Price *" type="number" value={form.price} onChange={e=>setForm({...form,price:e.target.value})} className="w-full border px-3 py-2 text-sm" /><input placeholder="Original Price" type="number" value={form.originalPrice} onChange={e=>setForm({...form,originalPrice:e.target.value})} className="w-full border px-3 py-2 text-sm" /></div>
-              {/* Image Upload */}
-              <div className="border-2 border-dashed border-gray-200 rounded p-3">
-                <p className="text-[10px] font-bold uppercase text-gray-500 mb-2">Front Image</p>
-                <div className="flex gap-2">
-                  <input placeholder="Image URL" value={form.image} onChange={e=>setForm({...form,image:e.target.value})} className="flex-1 border px-3 py-2 text-sm" />
-                  <input type="file" ref={fileInputRef} accept="image/*" onChange={(e) => handleFileUpload(e, "image")} className="hidden" />
-                  <button type="button" onClick={() => fileInputRef.current?.click()} className="px-3 py-2 bg-[var(--color-charcoal)] text-white text-[10px] font-bold uppercase whitespace-nowrap">Upload</button>
-                </div>
-                {form.image && <img src={form.image} alt="Preview" className="mt-2 w-20 h-20 object-cover rounded border" />}
-              </div>
-              <div className="border-2 border-dashed border-gray-200 rounded p-3">
-                <p className="text-[10px] font-bold uppercase text-gray-500 mb-2">Back Image (for 3D flip)</p>
-                <div className="flex gap-2">
-                  <input placeholder="Back image URL" value={form.backImage} onChange={e=>setForm({...form,backImage:e.target.value})} className="flex-1 border px-3 py-2 text-sm" />
-                  <input type="file" ref={backFileInputRef} accept="image/*" onChange={(e) => handleFileUpload(e, "backImage")} className="hidden" />
-                  <button type="button" onClick={() => backFileInputRef.current?.click()} className="px-3 py-2 bg-[var(--color-charcoal)] text-white text-[10px] font-bold uppercase whitespace-nowrap">Upload</button>
-                </div>
-                {form.backImage && <img src={form.backImage} alt="Back Preview" className="mt-2 w-20 h-20 object-cover rounded border" />}
-              </div>
               <div>
-                <p className="text-[10px] font-bold uppercase text-gray-500 mb-1">3D Model URL (.glb)</p>
-                <input placeholder="https://...model.glb (optional)" value={form.modelUrl} onChange={e=>setForm({...form,modelUrl:e.target.value})} className="w-full border px-3 py-2 text-sm" />
+                <label className={labelClass}>Product name</label>
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="e.g. USA Facebook Account (Aged / Verified)"
+                  className={inputClass}
+                />
               </div>
-              <input placeholder="Sizes (S,M,L,XL)" value={form.sizes} onChange={e=>setForm({...form,sizes:e.target.value})} className="w-full border px-3 py-2 text-sm" />
-              <select value={form.badge} onChange={e=>setForm({...form,badge:e.target.value})} className="w-full border px-3 py-2 text-sm"><option value="">No Badge</option><option value="Best Seller">Best Seller</option><option value="New Arrival">New Arrival</option></select>
-              <textarea placeholder="Description" value={form.description} onChange={e=>setForm({...form,description:e.target.value})} rows={3} className="w-full border px-3 py-2 text-sm" />
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelClass}>Category</label>
+                  <select
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    className={inputClass}
+                  >
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelClass}>Badge</label>
+                  <select
+                    value={form.badge}
+                    onChange={(e) => setForm({ ...form, badge: e.target.value })}
+                    className={inputClass}
+                  >
+                    <option value="">No badge</option>
+                    <option value="Best Seller">Best Seller</option>
+                    <option value="New Arrival">New Arrival</option>
+                    <option value="Hot">Hot</option>
+                    <option value="Restocked">Restocked</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className={labelClass}>Price ({COMMERCE.currency})</label>
+                  <input
+                    type="number"
+                    value={form.price}
+                    onChange={(e) => setForm({ ...form, price: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Was price</label>
+                  <input
+                    type="number"
+                    value={form.original_price}
+                    onChange={(e) =>
+                      setForm({ ...form, original_price: e.target.value })
+                    }
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Stock</label>
+                  <input
+                    type="number"
+                    value={form.stock}
+                    onChange={(e) => setForm({ ...form, stock: e.target.value })}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className={labelClass}>Country flags</label>
+                  <input
+                    value={form.country_flags}
+                    onChange={(e) =>
+                      setForm({ ...form, country_flags: e.target.value })
+                    }
+                    placeholder="🇺🇸🇬🇧"
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Delivery time</label>
+                  <input
+                    value={form.delivery}
+                    onChange={(e) => setForm({ ...form, delivery: e.target.value })}
+                    placeholder="Instant"
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className={labelClass}>Image</label>
+                <div className="flex gap-2">
+                  <input
+                    value={form.image}
+                    onChange={(e) => setForm({ ...form, image: e.target.value })}
+                    placeholder="/assets/images/facebook-3d.svg"
+                    className={inputClass}
+                  />
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    accept="image/*"
+                    onChange={handleUpload}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="px-3 py-2 rounded-xl bg-[var(--color-ink)] text-[var(--color-panel)] text-[10px] font-bold uppercase whitespace-nowrap"
+                  >
+                    Upload
+                  </button>
+                </div>
+                {form.image && (
+                  <div className="mt-2 w-16 h-16 rounded-xl bg-[var(--color-page)] border border-[var(--color-line)] flex items-center justify-center overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={asset(form.image)}
+                      alt="Preview"
+                      className="w-full h-full object-contain p-1"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className={labelClass}>Description</label>
+                <textarea
+                  value={form.description}
+                  onChange={(e) =>
+                    setForm({ ...form, description: e.target.value })
+                  }
+                  rows={2}
+                  className={`${inputClass} resize-none`}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>
+                  Specs — one per line
+                </label>
+                <textarea
+                  value={form.specs}
+                  onChange={(e) => setForm({ ...form, specs: e.target.value })}
+                  rows={4}
+                  placeholder={"Email included\nCookies bundled\n2FA-ready"}
+                  className={`${inputClass} resize-none`}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass}>Login guide URL</label>
+                <input
+                  value={form.guide_url}
+                  onChange={(e) => setForm({ ...form, guide_url: e.target.value })}
+                  placeholder="https://drive.google.com/…"
+                  className={inputClass}
+                />
+              </div>
             </div>
-            <div className="flex gap-3 mt-5"><button onClick={()=>setShowForm(false)} className="flex-1 border py-2 text-xs font-bold uppercase">Cancel</button><button onClick={handleSave} className="flex-1 bg-[var(--color-charcoal)] text-white py-2 text-xs font-bold uppercase hover:bg-[var(--color-accent)]">{editing?"Update":"Add"}</button></div>
+
+            <div className="flex gap-3 mt-5">
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="flex-1 py-2.5 rounded-xl border border-[var(--color-line)] text-xs font-bold uppercase tracking-wider"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                className="flex-1 py-2.5 rounded-xl bg-[var(--color-brand)] text-white text-xs font-bold uppercase tracking-wider"
+              >
+                {editing ? "Update" : "Add"}
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Catalog grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        {list.map(p=>(
-          <div key={p.id} className="bg-white border rounded-lg overflow-hidden">
-            <div className="aspect-[4/5] bg-gray-100"><img src={p.images[0]} alt={p.name} className="w-full h-full object-cover" /></div>
-            <div className="p-3">
-              <p className="text-[10px] text-[var(--color-gold)] font-bold uppercase">{p.team}</p>
-              <h3 className="text-xs font-medium line-clamp-1 mt-0.5">{p.name}</h3>
-              <div className="flex items-center justify-between mt-2"><span className="font-bold text-sm">${p.price}</span>{p.badge&&<span className="text-[9px] font-bold px-1.5 py-0.5 bg-gray-100 rounded">{p.badge}</span>}</div>
-              <div className="flex gap-2 mt-3"><button onClick={()=>openEdit(p)} className="flex-1 border py-1.5 text-[10px] font-bold uppercase hover:bg-gray-50">Edit</button><button onClick={()=>setList(pr=>pr.filter(x=>x.id!==p.id))} className="px-3 py-1.5 text-[10px] font-bold uppercase text-red-600 border border-red-200 hover:bg-red-50">Del</button></div>
+        {filtered.map((p) => {
+          const cat = getCategory(p.category);
+          const stock = stockLabel(p.stock);
+          return (
+            <div
+              key={p.id}
+              className="bg-[var(--color-panel)] rounded-2xl border border-[var(--color-line)] overflow-hidden"
+            >
+              <div className="aspect-square bg-[var(--color-page)] flex items-center justify-center">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={asset(p.image)}
+                  alt={p.name}
+                  className="w-full h-full object-contain p-4"
+                />
+              </div>
+              <div className="p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-[var(--color-brand)]">
+                    {cat?.name ?? p.category}
+                  </span>
+                  <span className="text-[13px] leading-none">
+                    {p.country_flags}
+                  </span>
+                </div>
+                <h3 className="text-xs font-semibold line-clamp-2 mt-1">
+                  {p.name}
+                </h3>
+                <div className="flex items-center justify-between mt-2">
+                  <span className="font-extrabold text-sm tabular-nums">
+                    {formatPrice(p.price)}
+                  </span>
+                  <span
+                    className={`text-[9px] font-bold uppercase ${
+                      stock.tone === "out"
+                        ? "text-[var(--color-danger)]"
+                        : stock.tone === "low"
+                          ? "text-[var(--color-warning)]"
+                          : "text-[var(--color-success)]"
+                    }`}
+                  >
+                    {p.stock} left
+                  </span>
+                </div>
+                <div className="flex gap-2 mt-3">
+                  <button
+                    type="button"
+                    onClick={() => openEdit(p)}
+                    className="flex-1 py-1.5 rounded-lg border border-[var(--color-line)] text-[10px] font-bold uppercase hover:bg-[var(--color-line)] transition-colors"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setList((prev) => prev.filter((x) => x.id !== p.id))
+                    }
+                    className="px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase text-[var(--color-danger)] border border-[var(--color-danger)]/25 hover:bg-[var(--color-danger)]/10 transition-colors"
+                  >
+                    Del
+                  </button>
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
+
+      {filtered.length === 0 && (
+        <p className="text-center py-16 text-sm text-[var(--color-ink-faint)]">
+          No products match “{query}”.
+        </p>
+      )}
     </div>
   );
 }

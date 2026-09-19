@@ -1,5 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import { useStore } from "@/lib/browserStore";
 
 const CURRENCY_KEY = "riotgear_currency";
 const currencies = [
@@ -14,9 +15,6 @@ const currencies = [
 ];
 
 export function getCurrency() {
-  if (typeof window === "undefined") return currencies[0];
-  const stored = localStorage.getItem(CURRENCY_KEY);
-  if (stored) { const found = currencies.find(c => c.code === stored); if (found) return found; }
   return currencies[0];
 }
 
@@ -27,21 +25,21 @@ export function convertPrice(usdPrice: number): { value: number; display: string
 }
 
 export default function IntegrationsPage() {
-  const [activeCurrency, setActiveCurrency] = useState("USD");
+  const [activeCurrency, setActiveCurrency] = useStore<string>(CURRENCY_KEY, "KES");
   const [mpesa, setMpesa] = useState({ shortcode: "174379", consumerKey: "sDnAFGR...", consumerSecret: "GJXhF6f...", callbackUrl: "https://example.com/api/mpesa/callback", mode: "sandbox" });
   const [paystack, setPaystack] = useState({ publicKey: "pk_test_xxx", secretKey: "sk_test_xxx", currency: "NGN", mode: "test" });
   const [flutterwave, setFlutterwave] = useState({ publicKey: "FLWPUBK_TEST-xxx", secretKey: "FLWSECK_TEST-xxx", encryptionKey: "FLWSECK_TESTxxx", currency: "NGN", mode: "test" });
-  const [whatsapp, setWhatsapp] = useState({ phone: "+254717702563", businessName: "RiotGear Store" });
+  const [whatsapp, setWhatsapp] = useState({ phone: "+254717702563", businessName: "Digital Hub Shop" });
   const [saved, setSaved] = useState("");
 
-  useEffect(() => { setActiveCurrency(getCurrency().code); }, []);
   const save = (n: string) => { setSaved(n); setTimeout(() => setSaved(""), 2000); };
-  const handleCurrencyChange = (code: string) => { setActiveCurrency(code); localStorage.setItem(CURRENCY_KEY, code); save("currency"); };
+  const handleCurrencyChange = (code: string) => { setActiveCurrency(code); save("currency"); };
 
   return (
     <div>
       <h1 className="text-2xl font-bold mb-1">Integrations</h1>
-      <p className="text-sm text-gray-500 mb-6">Payment gateways, messaging & global currency</p>
+      <p className="text-sm text-gray-500 mb-4">Payment gateways, messaging &amp; global currency</p>
+      <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 dark:border-amber-500/25 dark:bg-amber-500/10 p-3 text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed max-w-3xl">These fields are not yet connected to live gateways. Checkout currently runs on wallet, M-Pesa and WhatsApp confirmation. Wire a provider (or a small backend) before switching to live keys.</div>
       <div className="space-y-6">
         {/* Global Currency */}
         <div className="bg-white rounded-lg border p-6">

@@ -1,31 +1,49 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { getProductBySlug, products } from "@/lib/products";
+import {
+  getProductBySlug,
+  products as allProducts,
+  type Product,
+} from "@/lib/products";
+import { getCategory } from "@/lib/categories";
 import { useCart } from "@/context/CartContext";
-import { ProductCardFlip, ProductSpinViewer, Product3DModel } from "@/components/Product3DViewer";
-
-type ViewMode = "gallery" | "flip" | "spin" | "3d";
+import { asset } from "@/lib/asset";
+import { discountPercent, formatPrice, splitFlags, stockLabel } from "@/lib/format";
+import { DELIVERY, SUPPORT } from "@/lib/config";
+import Icon from "@/components/ui/Icon";
 
 export default function ProductDetailPage() {
-  const params = useParams();
-  const slug = params.slug as string;
-  const product = getProductBySlug(slug);
+  const params = useParams<{ slug: string }>();
+  const slug = params?.slug;
+  const product = slug ? getProductBySlug(slug) : undefined;
 
-  const { addToCart } = useCart();
-  const [selectedSize, setSelectedSize] = useState<string>("");
-  const [activeImage, setActiveImage] = useState(0);
+  const { addToCart, setIsCartOpen } = useCart();
+  const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("gallery");
+
+  const related = useMemo<Product[]>(() => {
+    if (!product) return [];
+    return allProducts
+      .filter((p) => p.category === product.category && p.id !== product.id)
+      .slice(0, 4);
+  }, [product]);
 
   if (!product) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--color-cream)]">
+      <div className="min-h-[70dvh] flex items-center justify-center px-4">
         <div className="text-center">
-          <h1 className="font-[var(--font-oswald)] text-3xl font-bold mb-4">Product Not Found</h1>
-          <Link href="/" className="text-[var(--color-accent)] font-bold underline">
+          <p className="text-4xl mb-3">🔍</p>
+          <h1 className="text-xl font-extrabold">Product not found</h1>
+          <p className="text-sm text-[var(--color-ink-soft)] mt-1">
+            This item may have been sold out or renamed.
+          </p>
+          <Link
+            href="/"
+            className="inline-block mt-5 px-6 py-3 rounded-xl bg-[var(--color-brand)] text-white text-xs font-bold uppercase tracking-wider"
+          >
             Back to Store
           </Link>
         </div>
@@ -33,232 +51,372 @@ export default function ProductDetailPage() {
     );
   }
 
-  const handleAddToCart = () => {
-    if (!selectedSize) return;
-    addToCart({
-      id: product.id,
-      name: `${product.name} (${selectedSize})`,
-      team: product.team,
-      price: product.price,
-      image: product.images[0],
-    });
+  const category = getCategory(product.category);
+  const off = discountPercent(product.price, product.original_price);
+  const stock = stockLabel(product.stock);
+  const soldOut = product.stock <= 0;
+  const total = product.price * quantity;
+
+  const handleBuyNow = () => {
+    addToCart(
+      {
+        id: product.id,
+        slug: product.slug,
+        name: product.name,
+        category: category?.name ?? product.category,
+        price: product.price,
+        image: product.image,
+      },
+      quantity
+    );
     setAdded(true);
-    setTimeout(() => setAdded(false), 2000);
+    setTimeout(() => setAdded(false), 1600);
   };
 
-  // Get related products (same category, exclude current)
-  const related = products
-    .filter((p) => p.category === product.category && p.id !== product.id)
-    .slice(0, 3);
-
   return (
-    <div className="min-h-screen bg-[var(--color-cream)]">
-      {/* Top Nav */}
-      <div className="bg-white border-b sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <Link href="/" className="font-[var(--font-oswald)] text-xl font-bold uppercase">
-            RIOT<span className="text-[var(--color-accent)]">GEAR</span>
-          </Link>
-          <nav className="text-xs text-gray-500">
-            <Link href="/" className="hover:text-[var(--color-accent)]">Home</Link>
-            <span className="mx-2">/</span>
-            <span className="text-[var(--color-charcoal)] font-medium">{product.team}</span>
-          </nav>
-        </div>
-      </div>
+    <div className="pb-28 lg:pb-0">
+      {/* Breadcrumb */}
+      <nav className="max-w-6xl mx-auto px-4 pt-4 text-[11px] text-[var(--color-ink-soft)] flex items-center gap-1.5 flex-wrap">
+        <Link href="/" className="hover:text-[var(--color-brand)]">
+          Home
+        </Link>
+        <Icon name="chevronRight" className="w-3 h-3" />
+        {category && (
+          <>
+            <Link
+              href="/"
+              className="hover:text-[var(--color-brand)]"
+            >
+              {category.name}
+            </Link>
+            <Icon name="chevronRight" className="w-3 h-3" />
+          </>
+        )}
+        <span className="text-[var(--color-ink)] font-semibold truncate max-w-[60%]">
+          {product.name}
+        </span>
+      </nav>
 
-      {/* Product Section */}
-      <div className="max-w-7xl mx-auto px-4 py-8 sm:py-12">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-16">
-          {/* Images */}
-          <div className="space-y-4">
-            {/* View Mode Tabs */}
-            <div className="flex gap-1 bg-gray-100 p-1 rounded">
-              {(["gallery", "flip", "spin", "3d"] as ViewMode[]).map((mode) => (
-                <button key={mode} onClick={() => setViewMode(mode)} className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded transition-colors ${viewMode === mode ? "bg-white text-[var(--color-charcoal)] shadow-sm" : "text-gray-500 hover:text-gray-700"}`}>
-                  {mode === "gallery" ? "Gallery" : mode === "flip" ? "3D Flip" : mode === "spin" ? "360°" : "3D Model"}
-                </button>
-              ))}
-            </div>
+      <div className="max-w-6xl mx-auto px-4 py-5 grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12">
+        {/* ------------------------- Visual ------------------------- */}
+        <div>
+          <div className="relative aspect-square rounded-2xl bg-gradient-to-br from-[var(--color-line)] to-[var(--color-panel)] border border-[var(--color-line)] overflow-hidden shadow-sm">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={asset(product.image)}
+              alt={product.name}
+              className="w-full h-full object-contain p-10"
+            />
 
-            {/* View Content */}
-            {viewMode === "gallery" && (
-              <>
-                <div className="bg-white border border-gray-100 overflow-hidden aspect-[4/5]">
-                  <img src={product.images[activeImage]} alt={product.name} className="w-full h-full object-cover" />
-                </div>
-                {product.images.length > 1 && (
-                  <div className="flex gap-3">
-                    {product.images.map((img, i) => (
-                      <button key={i} onClick={() => setActiveImage(i)} className={`w-20 h-20 border-2 overflow-hidden transition-all ${activeImage === i ? "border-[var(--color-gold)]" : "border-gray-200 hover:border-gray-400"}`}>
-                        <img src={img} alt="" className="w-full h-full object-cover" />
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-
-            {viewMode === "flip" && (
-              <ProductCardFlip frontImage={product.images[0]} backImage={product.backImage || product.images[1]} name={product.name} />
-            )}
-
-            {viewMode === "spin" && (
-              <ProductSpinViewer images={product.images} name={product.name} />
-            )}
-
-            {viewMode === "3d" && (
-              <Product3DModel modelUrl={product.modelUrl} fallbackImage={product.images[0]} name={product.name} />
-            )}
-          </div>
-
-          {/* Product Info */}
-          <div className="flex flex-col">
-            {/* Badges */}
-            <div className="flex gap-2 mb-3">
+            <div className="absolute top-3 left-3 flex flex-col gap-1.5">
               {product.badge && (
-                <span className={`text-[10px] font-bold px-2 py-1 uppercase tracking-wider text-white ${
-                  product.badge === "Best Seller" ? "bg-[var(--color-accent)]" : "bg-[var(--color-charcoal)]"
-                }`}>
+                <span className="text-[10px] font-extrabold uppercase tracking-wider px-2.5 py-1 rounded-full bg-[var(--color-brand)] text-white shadow-sm">
                   {product.badge}
                 </span>
               )}
-              <span className="text-[10px] font-bold px-2 py-1 uppercase tracking-wider text-[var(--color-gold)] border border-[var(--color-gold)]">
-                {product.category}
-              </span>
-            </div>
-
-            {/* Team */}
-            <p className="text-[var(--color-gold)] text-xs font-bold uppercase tracking-[0.2em]">
-              {product.team}
-            </p>
-
-            {/* Name */}
-            <h1 className="font-[var(--font-oswald)] text-2xl sm:text-3xl md:text-4xl font-bold text-[var(--color-charcoal)] mt-2 uppercase leading-tight">
-              {product.name}
-            </h1>
-
-            {/* Price */}
-            <div className="flex items-baseline gap-3 mt-4">
-              <span className="text-3xl font-bold text-[var(--color-charcoal)]">${product.price}</span>
-              {product.originalPrice && (
-                <>
-                  <span className="text-lg text-gray-400 line-through">${product.originalPrice}</span>
-                  <span className="text-xs font-bold text-[var(--color-accent)] bg-red-50 px-2 py-0.5">
-                    SAVE ${(product.originalPrice - product.price).toFixed(2)}
-                  </span>
-                </>
+              {off !== null && (
+                <span className="text-[10px] font-extrabold uppercase px-2.5 py-1 rounded-full bg-[var(--color-ink)] text-[var(--color-panel)]">
+                  Save {off}%
+                </span>
               )}
             </div>
-            <p className="text-xs text-green-700 font-semibold mt-1">Free Shipping on this item</p>
+          </div>
 
-            {/* Description */}
-            <p className="text-sm text-gray-600 mt-6 leading-relaxed">
-              {product.description}
-            </p>
-
-            {/* Size Selector */}
-            <div className="mt-8">
-              <p className="text-xs font-bold uppercase tracking-wider text-[var(--color-charcoal)] mb-3">
-                Select Size
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {product.sizes.map((size) => (
-                  <button
-                    key={size}
-                    onClick={() => setSelectedSize(size)}
-                    className={`w-12 h-12 border-2 text-sm font-bold transition-all ${
-                      selectedSize === size
-                        ? "border-[var(--color-gold)] bg-[var(--color-gold)] text-white"
-                        : "border-gray-200 text-[var(--color-charcoal)] hover:border-[var(--color-charcoal)]"
-                    }`}
-                  >
-                    {size}
-                  </button>
-                ))}
+          {/* Trust strip */}
+          <div className="grid grid-cols-3 gap-2 mt-3">
+            {[
+              { icon: "bolt" as const, label: product.delivery ?? "Instant" },
+              { icon: "shield" as const, label: "24h Replacement" },
+              { icon: "headset" as const, label: "1h Support" },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="rounded-xl border border-[var(--color-line)] p-2.5 text-center"
+              >
+                <Icon
+                  name={item.icon}
+                  className="w-4 h-4 mx-auto text-[var(--color-brand)]"
+                />
+                <p className="text-[9px] font-bold uppercase tracking-wider mt-1 text-[var(--color-ink-soft)]">
+                  {item.label}
+                </p>
               </div>
-              {!selectedSize && (
-                <p className="text-[10px] text-gray-400 mt-2">Please select a size to continue</p>
-              )}
-            </div>
-
-            {/* Add to Cart */}
-            <button
-              onClick={handleAddToCart}
-              disabled={!selectedSize}
-              className={`mt-8 w-full py-4 font-bold text-sm uppercase tracking-[0.2em] transition-all duration-300 ${
-                added
-                  ? "bg-green-600 text-white"
-                  : selectedSize
-                  ? "bg-[var(--color-charcoal)] text-white hover:bg-[var(--color-accent)]"
-                  : "bg-gray-200 text-gray-400 cursor-not-allowed"
-              }`}
-            >
-              {added ? "Added to Cart!" : selectedSize ? "Add to Cart" : "Select a Size"}
-            </button>
-
-            {/* Details */}
-            <div className="mt-10 border-t border-gray-200 pt-6">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--color-charcoal)] mb-4">
-                Product Details
-              </h3>
-              <ul className="space-y-2">
-                {product.details.map((detail, i) => (
-                  <li key={i} className="flex items-center gap-2 text-sm text-gray-600">
-                    <span className="w-1.5 h-1.5 bg-[var(--color-gold)] rounded-full flex-shrink-0" />
-                    {detail}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            ))}
           </div>
         </div>
 
-        {/* Related Products */}
-        {related.length > 0 && (
-          <div className="mt-16 sm:mt-24 border-t border-gray-200 pt-12">
-            <div className="flex items-end justify-between mb-8">
-              <div>
-                <p className="text-[var(--color-gold)] text-xs font-bold uppercase tracking-[0.2em] mb-1">
-                  You May Also Like
-                </p>
-                <h2 className="font-[var(--font-oswald)] text-2xl font-bold uppercase text-[var(--color-charcoal)]">
-                  Related Products
-                </h2>
+        {/* -------------------------- Info -------------------------- */}
+        <div className="flex flex-col">
+          {/* Category + availability */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {category && (
+              <Link
+                href="/"
+                className="text-[10px] font-extrabold uppercase tracking-[0.15em] px-2.5 py-1 rounded-full bg-[var(--color-blue)]/10 text-[var(--color-blue)] hover:bg-[var(--color-blue)]/20 transition-colors"
+              >
+                {category.name}
+              </Link>
+            )}
+            <span
+              className={`text-[10px] font-extrabold uppercase tracking-[0.15em] px-2.5 py-1 rounded-full ${
+                stock.tone === "out"
+                  ? "bg-[var(--color-danger)]/10 text-[var(--color-danger)]"
+                  : stock.tone === "low"
+                    ? "bg-[var(--color-warning)]/10 text-[var(--color-warning)]"
+                    : "bg-[var(--color-success)]/10 text-[var(--color-success)]"
+              }`}
+            >
+              {stock.text}
+            </span>
+          </div>
+
+          {/* Title */}
+          <h1 className="text-xl sm:text-2xl font-extrabold leading-tight mt-3">
+            {product.name}
+          </h1>
+
+          {/* Flag pills */}
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-faint)]">
+              Regions
+            </span>
+            {splitFlags(product.country_flags).map((flag, i) => (
+              <span
+                key={`${flag}-${i}`}
+                className="px-2.5 py-1 rounded-full bg-[var(--color-line)] text-sm leading-none"
+              >
+                {flag}
+              </span>
+            ))}
+          </div>
+
+          {/* Price */}
+          <div className="flex items-baseline gap-2.5 mt-4 flex-wrap">
+            <span className="text-3xl font-extrabold text-[var(--color-brand)] tabular-nums">
+              {formatPrice(product.price)}
+            </span>
+            {product.original_price && (
+              <span className="text-base text-[var(--color-ink-faint)] line-through tabular-nums">
+                {formatPrice(product.original_price)}
+              </span>
+            )}
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-soft)]">
+              {product.currency}
+            </span>
+          </div>
+
+          {/* Description */}
+          <p className="text-sm text-[var(--color-ink-soft)] mt-3 leading-relaxed">
+            {product.description}
+          </p>
+
+          {/* Specs */}
+          <div className="mt-5 rounded-2xl border border-[var(--color-line)] p-4">
+            <h2 className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-[var(--color-ink-faint)] mb-3">
+              What you get
+            </h2>
+            <ul className="space-y-2">
+              {product.specs.map((spec) => (
+                <li key={spec} className="flex items-start gap-2.5 text-sm">
+                  <span className="w-4 h-4 rounded-full bg-[var(--color-success)]/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Icon
+                      name="check"
+                      className="w-2.5 h-2.5 text-[var(--color-success)]"
+                    />
+                  </span>
+                  <span className="text-[var(--color-ink-soft)] leading-snug">
+                    {spec}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Guide */}
+          <div className="mt-3">
+            {product.guide_url ? (
+              <a
+                href={product.guide_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2.5 rounded-xl border border-[var(--color-line)] p-3 text-xs font-bold hover:border-[var(--color-brand)] transition-colors"
+              >
+                <Icon name="download" className="w-4 h-4 text-[var(--color-brand)]" />
+                Login guide &amp; setup instructions
+                <Icon
+                  name="chevronRight"
+                  className="w-3.5 h-3.5 ml-auto text-[var(--color-ink-faint)]"
+                />
+              </a>
+            ) : (
+              <div className="flex items-center gap-2.5 rounded-xl border border-dashed border-[var(--color-line)] p-3 text-xs text-[var(--color-ink-soft)]">
+                <Icon name="headset" className="w-4 h-4" />
+                Setup instructions are sent with your order.
+              </div>
+            )}
+          </div>
+
+          {/* Quantity + total */}
+          <div className="mt-5 rounded-2xl bg-[var(--color-page)] border border-[var(--color-line)] p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)]">
+                Quantity
+              </span>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  aria-label="Decrease quantity"
+                  disabled={quantity <= 1}
+                  className="w-9 h-9 rounded-full border border-[var(--color-line)] bg-[var(--color-panel)] flex items-center justify-center hover:border-[var(--color-brand)] disabled:opacity-40 transition-colors"
+                >
+                  <Icon name="minus" className="w-4 h-4" />
+                </button>
+                <span className="w-8 text-center font-extrabold tabular-nums">
+                  {quantity}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => q + 1)}
+                  aria-label="Increase quantity"
+                  className="w-9 h-9 rounded-full border border-[var(--color-line)] bg-[var(--color-panel)] flex items-center justify-center hover:border-[var(--color-brand)] transition-colors"
+                >
+                  <Icon name="plus" className="w-4 h-4" />
+                </button>
               </div>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
-              {related.map((p) => (
-                <Link key={p.id} href={`/products/${p.slug}/`} className="block group">
-                  <div className="bg-white border border-gray-100 hover:border-[var(--color-gold)] transition-all duration-300 overflow-hidden">
-                    <div className="aspect-[4/5] overflow-hidden">
-                      <img
-                        src={p.images[0]}
-                        alt={p.name}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      />
-                    </div>
-                    <div className="p-3 sm:p-4">
-                      <p className="text-[var(--color-gold)] text-[10px] font-bold uppercase tracking-wider">{p.team}</p>
-                      <h3 className="font-[var(--font-oswald)] text-xs sm:text-sm font-medium mt-1 line-clamp-1">{p.name}</h3>
-                      <p className="font-bold mt-1">${p.price}</p>
-                    </div>
-                  </div>
-                </Link>
-              ))}
+
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-[var(--color-line)]">
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)]">
+                Total
+              </span>
+              <span className="text-2xl font-extrabold text-[var(--color-brand)] tabular-nums">
+                {formatPrice(total)}
+              </span>
             </div>
           </div>
-        )}
+
+          {/* Desktop CTA */}
+          <button
+            type="button"
+            onClick={handleBuyNow}
+            disabled={soldOut}
+            className={`hidden lg:flex mt-4 w-full py-4 rounded-2xl items-center justify-center gap-2.5 text-sm font-extrabold uppercase tracking-widest transition-all ${
+              soldOut
+                ? "bg-[var(--color-line)] text-[var(--color-ink-faint)] cursor-not-allowed"
+                : added
+                  ? "bg-[var(--color-success)] text-white"
+                  : "bg-[var(--color-brand)] hover:bg-[var(--color-brand-strong)] text-white"
+            }`}
+          >
+            <Icon name={added ? "check" : "cart"} className="w-5 h-5" />
+            {soldOut
+              ? "Out of Stock"
+              : added
+                ? "Added to Cart"
+                : `Buy Now — ${formatPrice(total)}`}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsCartOpen(true)}
+            className="hidden lg:block mt-2 w-full py-3 text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)] hover:text-[var(--color-brand)] transition-colors"
+          >
+            View cart
+          </button>
+
+          {/* Support note */}
+          <p className="text-[11px] text-[var(--color-ink-faint)] mt-4 leading-relaxed">
+            Need a custom order or bulk pricing? Message us on{" "}
+            <a
+              href={`https://wa.me/${SUPPORT.whatsapp}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold text-[var(--color-brand)] hover:underline"
+            >
+              WhatsApp
+            </a>{" "}
+            or{" "}
+            <a
+              href={SUPPORT.telegramUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-bold text-[var(--color-brand)] hover:underline"
+            >
+              Telegram
+            </a>
+            .
+          </p>
+        </div>
       </div>
 
-      {/* Back to Store */}
-      <div className="bg-white border-t py-6 text-center">
-        <Link
-          href="/"
-          className="inline-block text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-charcoal)] border-b-2 border-[var(--color-gold)] hover:text-[var(--color-accent)] transition-colors pb-0.5"
-        >
-          Back to Store
-        </Link>
+      {/* Related */}
+      {related.length > 0 && (
+        <section className="max-w-6xl mx-auto px-4 mt-10 lg:mt-16">
+          <h2 className="text-sm font-extrabold uppercase tracking-[0.15em] mb-3">
+            You may also like
+          </h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {related.map((item) => (
+              <Link
+                key={item.id}
+                href={`/products/${item.slug}/`}
+                className="group bg-[var(--color-panel)] rounded-2xl border border-[var(--color-line)] shadow-sm hover:shadow-md hover:border-[var(--color-brand)]/40 transition-all overflow-hidden"
+              >
+                <div className="aspect-square bg-gradient-to-br from-[var(--color-line)] to-[var(--color-panel)]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={asset(item.image)}
+                    alt={item.name}
+                    loading="lazy"
+                    className="w-full h-full object-contain p-4 group-hover:scale-105 transition-transform duration-500"
+                  />
+                </div>
+                <div className="p-3">
+                  <p className="text-sm leading-none mb-1">{item.country_flags}</p>
+                  <h3 className="text-xs font-semibold line-clamp-2 group-hover:text-[var(--color-brand)] transition-colors">
+                    {item.name}
+                  </h3>
+                  <p className="text-sm font-extrabold text-[var(--color-brand)] mt-1.5 tabular-nums">
+                    {formatPrice(item.price)}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Sticky mobile CTA */}
+      <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-[var(--color-panel)]/95 backdrop-blur border-t border-[var(--color-line)] p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-faint)]">
+              Total
+            </p>
+            <p className="text-lg font-extrabold text-[var(--color-brand)] leading-tight tabular-nums">
+              {formatPrice(total)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleBuyNow}
+            disabled={soldOut}
+            className={`flex-1 py-3.5 rounded-xl flex items-center justify-center gap-2 text-sm font-extrabold uppercase tracking-wider transition-colors ${
+              soldOut
+                ? "bg-[var(--color-line)] text-[var(--color-ink-faint)]"
+                : added
+                  ? "bg-[var(--color-success)] text-white"
+                  : "bg-[var(--color-brand)] text-white"
+            }`}
+          >
+            <Icon name={added ? "check" : "cart"} className="w-5 h-5" />
+            {soldOut ? "Out of Stock" : added ? "Added!" : "Buy Now"}
+          </button>
+        </div>
+        <p className="text-[10px] text-[var(--color-ink-soft)] mt-1.5 text-center">
+          {DELIVERY.promise} · {DELIVERY.guarantee}
+        </p>
       </div>
     </div>
   );

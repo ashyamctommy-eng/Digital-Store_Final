@@ -1,29 +1,54 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import { Oswald } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { CartProvider } from "@/context/CartContext";
 import { AuthProvider } from "@/context/AuthContext";
+import { WalletProvider } from "@/context/WalletContext";
+import { ThemeProvider, themeInitScript } from "@/context/ThemeContext";
+import { BRAND } from "@/lib/config";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const mono = JetBrains_Mono({
+  variable: "--font-mono-stack",
   subsets: ["latin"],
-});
-
-const oswald = Oswald({
-  variable: "--font-oswald",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "RiotGear Store - Premium Sports Jerseys & Apparel",
-  description: "Shop the best sports jerseys, team gear, and athletic apparel for Men, Women, and Kids.",
+  title: {
+    default: `${BRAND.fullName} — Accounts, Verifications, VPNs & Proxies`,
+    template: `%s | ${BRAND.fullName}`,
+  },
+  description:
+    "Buy verified social media accounts, SMS verification numbers, premium VPN subscriptions and residential proxies. Instant delivery, 24-hour replacement guarantee.",
+  keywords: [
+    "buy facebook accounts",
+    "tiktok accounts",
+    "instagram accounts",
+    "sms verification",
+    "virtual numbers",
+    "vpn accounts",
+    "residential proxies",
+  ],
+  openGraph: {
+    title: `${BRAND.fullName} — Digital Accounts Marketplace`,
+    description: BRAND.tagline,
+    type: "website",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f8f9fa" },
+    { media: "(prefers-color-scheme: dark)", color: "#0e1116" },
+  ],
 };
 
 export default function RootLayout({
@@ -34,17 +59,24 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${oswald.variable} antialiased`}
+      className={`${inter.variable} ${mono.variable} antialiased`}
+      suppressHydrationWarning
     >
       <head>
-        <script src="https://js.paystack.co/v1/inline.js" async></script>
+        {/*
+          Runs before first paint so the persisted theme is applied without a
+          flash of the wrong colour scheme. Must stay inline and synchronous.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body className="min-h-screen flex flex-col overflow-x-hidden">
-        <AuthProvider>
-          <CartProvider>
-            {children}
-          </CartProvider>
-        </AuthProvider>
+      <body className="min-h-dvh flex flex-col">
+        <ThemeProvider>
+          <AuthProvider>
+            <WalletProvider>
+              <CartProvider>{children}</CartProvider>
+            </WalletProvider>
+          </AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

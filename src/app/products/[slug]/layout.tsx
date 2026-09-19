@@ -1,9 +1,8 @@
+import StorefrontShell from "@/components/StorefrontShell";
 import { products } from "@/lib/products";
 
 export function generateStaticParams() {
-  return products.map((product) => ({
-    slug: product.slug,
-  }));
+  return products.map((product) => ({ slug: product.slug }));
 }
 
 export default function ProductLayout({
@@ -11,5 +10,5 @@ export default function ProductLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <>{children}</>;
+  return <StorefrontShell>{children}</StorefrontShell>;
 }

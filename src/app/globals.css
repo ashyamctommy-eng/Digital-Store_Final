@@ -1,52 +1,201 @@
 @import "tailwindcss";
 
+/* ------------------------------------------------------------------
+   Theme strategy
+   Dark mode is class-based (`.dark` on <html>) so it can be toggled
+   and persisted without a server round-trip.
+------------------------------------------------------------------ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
-  --color-background: #fafafa;
-  --color-foreground: #1a1a1a;
-  --color-accent: #c8102e;
-  --color-accent-dark: #9b0a20;
-  --color-gold: #c9a96e;
-  --color-gold-light: #e8d5a3;
-  --color-cream: #f8f5f0;
-  --color-charcoal: #2d2d2d;
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-oswald: var(--font-oswald);
+  /* Brand */
+  --color-brand: #e63946;
+  --color-brand-strong: #dc2626;
+  --color-brand-dark: #b91c1c;
+
+  /* Category banner gradients */
+  --color-blue: #0066ff;
+  --color-blue-strong: #0052cc;
+
+  /* Surfaces (light) */
+  --color-page: #f8f9fa;
+  --color-panel: #ffffff;
+  --color-line: #eceef1;
+  --color-ink: #111827;
+  --color-ink-soft: #6b7280;
+  --color-ink-faint: #9ca3af;
+
+  /* Semantic */
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-mono-stack), ui-monospace, SFMono-Regular, monospace;
+
+  --radius-card: 16px;
+
+  /*
+    Legacy token aliases.
+    The admin and account areas still reference the old jersey-store palette
+    and "Oswald" heading font. Rather than leave those screens with undefined
+    colours, they are aliased onto the new design tokens. New components should
+    use the semantic tokens above directly.
+  */
+  --color-charcoal: var(--color-ink);
+  --color-accent: var(--color-brand);
+  --color-accent-dark: var(--color-brand-dark);
+  --color-gold: var(--color-brand);
+  --color-gold-light: #f3a3a9;
+  --color-cream: var(--color-page);
+  --font-oswald: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+
+/* ------------------------------------------------------------------
+   Dark theme overrides. Anything referencing these tokens flips
+   automatically, so components stay free of dark: variants where
+   possible.
+------------------------------------------------------------------ */
+.dark {
+  --color-page: #0e1116;
+  --color-panel: #171b22;
+  --color-line: #262b35;
+  --color-ink: #f3f4f6;
+  --color-ink-soft: #9ca3af;
+  --color-ink-faint: #6b7280;
 }
 
 html {
   scroll-behavior: smooth;
   overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
-  background: var(--color-cream);
-  color: var(--color-foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: var(--color-page);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
   overflow-x: hidden;
   width: 100%;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 * {
   box-sizing: border-box;
 }
 
-/* Premium selection color */
-::selection {
-  background: var(--color-gold);
-  color: white;
+/* Hide scrollbars on horizontal chip rails / carousels */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
-/* Smooth scrollbar */
+::selection {
+  background: var(--color-brand);
+  color: #fff;
+}
+
+/* Slim, theme-aware scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--color-cream);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-gold);
-  border-radius: 3px;
+  background: var(--color-line);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-faint);
+}
+
+/* Auto-scrolling marquee used by the notice slider */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+.animate-marquee {
+  animation: marquee 28s linear infinite;
+}
+.marquee-pause:hover .animate-marquee {
+  animation-play-state: paused;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-up {
+  animation: fade-up 0.35s ease both;
+}
+
+@keyframes slide-in-right {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.animate-slide-in-left {
+  animation: slide-in-left 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.animate-pop-in {
+  animation: pop-in 0.22s ease-out both;
+}
+
+/* Respect users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee,
+  .animate-fade-up,
+  .animate-slide-in-right,
+  .animate-slide-in-left,
+  .animate-pop-in {
+    animation: none !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
 }

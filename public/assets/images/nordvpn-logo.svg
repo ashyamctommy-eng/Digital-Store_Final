@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img">
+  <defs>
+    <linearGradient id="nvbg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0066FF"/>
+      <stop offset="100%" stop-color="#003F9E"/>
+    </linearGradient>
+    <linearGradient id="nvbg-gloss" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="nvbg-shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0f172a" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <rect x="26" y="26" width="460" height="460" rx="112" fill="url(#nvbg)" filter="url(#nvbg-shadow)"/>
+  <rect x="26" y="26" width="460" height="460" rx="112" fill="url(#nvbg-gloss)"/>
+  <path d="M256 104l124 46v96c0 84-52 148-124 174-72-26-124-90-124-174v-96z" fill="#ffffff" opacity="0.96"/>
+  <path d="M256 130l100 37v79c0 68-42 120-100 143-58-23-100-75-100-143v-79z" fill="#0066FF"/>
+  <path d="M212 320V192h30l60 82v-82h28v128h-28l-62-84v84z" fill="#ffffff"/>
+</svg>

@@ -2,17 +2,26 @@
 import { useState, useEffect } from "react";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firestore";
+import { formatPrice } from "@/lib/format";
 
 export default function UsersPage() {
-  const [users, setUsers] = useState<any[]>([]);
+  interface CustomerRow {
+  id: string;
+  name: string;
+  email: string;
+  orders: number;
+  spent: number;
+}
+
+const [users, setUsers] = useState<CustomerRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
         const snap = await getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc")));
-        const map = new Map<string, any>();
-        snap.docs.forEach(d => { const data = d.data(); if (data.userId && !map.has(data.userId)) map.set(data.userId, { id: data.userId, name: data.userName||"Unknown", email: data.userEmail||"—", orders: 0, spent: 0 }); if (data.userId) { const u = map.get(data.userId); u.orders++; u.spent += data.totalAmount||0; }});
+        const map = new Map<string, CustomerRow>();
+        snap.docs.forEach(d => { const data = d.data(); if (data.userId && !map.has(data.userId)) map.set(data.userId, { id: data.userId, name: data.userName||"Unknown", email: data.userEmail||"—", orders: 0, spent: 0 }); if (data.userId) { const u = map.get(data.userId)!; u.orders++; u.spent += data.totalAmount||0; }});
         setUsers(Array.from(map.values()));
       } catch (e) { console.error(e); }
       setLoading(false);
@@ -35,7 +44,7 @@ export default function UsersPage() {
                 <td className="px-5 py-3 flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-[var(--color-charcoal)] text-white flex items-center justify-center text-xs font-bold">{u.name.charAt(0)}</div><span className="text-xs font-medium">{u.name}</span></td>
                 <td className="px-5 py-3 text-xs text-gray-600">{u.email}</td>
                 <td className="px-5 py-3 text-xs font-bold">{u.orders}</td>
-                <td className="px-5 py-3 text-xs font-bold text-green-700">${u.spent.toFixed(2)}</td>
+                <td className="px-5 py-3 text-xs font-bold text-green-700">{formatPrice(u.spent)}</td>
               </tr>
             ))}
           </tbody>

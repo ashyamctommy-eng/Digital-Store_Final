@@ -10,6 +10,7 @@ import {
   updateProfile,
 } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { errorCode } from "@/lib/orders";
 
 export default function SignInPage() {
   const { user, signInWithGoogle } = useAuth();
@@ -43,14 +44,15 @@ export default function SignInPage() {
         await signInWithEmailAndPassword(auth, email, password);
       }
       router.push("/");
-    } catch (err: any) {
-      const msg = err.code === "auth/email-already-in-use"
+    } catch (err: unknown) {
+      const code = errorCode(err);
+      const msg = code === "auth/email-already-in-use"
         ? "Email already registered. Try signing in."
-        : err.code === "auth/wrong-password" || err.code === "auth/user-not-found"
+        : code === "auth/wrong-password" || code === "auth/user-not-found"
         ? "Invalid email or password."
-        : err.code === "auth/weak-password"
+        : code === "auth/weak-password"
         ? "Password must be at least 6 characters."
-        : err.code === "auth/invalid-email"
+        : code === "auth/invalid-email"
         ? "Please enter a valid email address."
         : "Something went wrong. Please try again.";
       setError(msg);
@@ -64,8 +66,8 @@ export default function SignInPage() {
     try {
       await signInWithGoogle();
       router.push("/");
-    } catch (err: any) {
-      if (err.code !== "auth/popup-closed-by-user") {
+    } catch (err: unknown) {
+      if (errorCode(err) !== "auth/popup-closed-by-user") {
         setError("Google sign-in failed. Please try again.");
       }
     }
@@ -75,10 +77,10 @@ export default function SignInPage() {
   return (
     <div className="min-h-screen flex flex-col bg-[var(--color-cream)]">
       {/* Header */}
-      <div className="bg-[var(--color-charcoal)] text-white py-5 text-center">
+      <div className="bg-[var(--color-ink)] text-[var(--color-panel)] py-5 text-center">
         <Link href="/">
           <h1 className="font-[var(--font-oswald)] text-2xl font-bold tracking-tight uppercase">
-            RIOT<span className="text-[var(--color-accent)]">GEAR</span>
+            DIGITAL<span className="text-[var(--color-accent)]">HUB SHOP</span>
           </h1>
         </Link>
       </div>
@@ -94,7 +96,7 @@ export default function SignInPage() {
               </h2>
               <p className="text-sm text-gray-500 mt-2">
                 {isSignUp
-                  ? "Join RiotGear for exclusive access to new drops."
+                  ? "Create an account to keep every purchase in your dashboard — forever."
                   : "Sign in to your account to continue shopping."}
               </p>
             </div>

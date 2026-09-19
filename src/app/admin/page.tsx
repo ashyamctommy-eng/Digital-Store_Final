@@ -3,26 +3,39 @@
 import { useState, useEffect } from "react";
 import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
 import { db } from "@/lib/firestore";
+import { formatPrice } from "@/lib/format";
+import type { StoredOrder } from "@/lib/orders";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState([
-    { label: "Total Revenue", value: "$0", color: "text-green-600 bg-green-50", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
+    { label: "Revenue", value: "—", color: "text-green-600 bg-green-50", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
     { label: "Total Orders", value: "0", color: "text-blue-600 bg-blue-50", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" },
-    { label: "Users", value: "—", color: "text-purple-600 bg-purple-50", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" },
-    { label: "Pending", value: "0", color: "text-amber-600 bg-amber-50", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
+    { label: "Customers", value: "—", color: "text-purple-600 bg-purple-50", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" },
+    { label: "Awaiting Delivery", value: "0", color: "text-amber-600 bg-amber-50", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
   ]);
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+  const [recentOrders, setRecentOrders] = useState<StoredOrder[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
       try {
         const snap = await getDocs(query(collection(db, "orders"), orderBy("createdAt", "desc"), limit(10)));
-        const orders = snap.docs.map((d) => ({ id: d.id, ...d.data(), createdAt: d.data().createdAt?.toDate() }));
+        const orders: StoredOrder[] = snap.docs.map((d) => ({
+          ...(d.data() as Omit<StoredOrder, "id">),
+          id: d.id,
+          createdAt: d.data().createdAt?.toDate(),
+        }));
         setRecentOrders(orders);
-        const rev = orders.reduce((s: number, o: any) => s + (o.totalAmount || 0), 0);
-        const pend = orders.filter((o: any) => o.status === "pending").length;
-        setStats((p) => [{ ...p[0], value: `$${rev.toFixed(2)}` }, { ...p[1], value: `${snap.size}` }, p[2], { ...p[3], value: `${pend}` }]);
+        const rev = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+        const pend = orders.filter(
+          (o) => o.status === "pending" || o.status === "paid"
+        ).length;
+        setStats((p) => [
+          { ...p[0], value: formatPrice(rev) },
+          { ...p[1], value: `${snap.size}` },
+          p[2],
+          { ...p[3], value: `${pend}` },
+        ]);
       } catch (e) { console.error(e); }
       setLoading(false);
     }
@@ -51,13 +64,13 @@ export default function AdminDashboard() {
             <tbody>
               {loading ? <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">Loading...</td></tr> :
                recentOrders.length === 0 ? <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">No orders yet</td></tr> :
-               recentOrders.map((o: any) => (
+               recentOrders.map((o) => (
                 <tr key={o.id} className="border-b hover:bg-gray-50/50">
                   <td className="px-4 py-3 font-mono text-[11px]">#{o.id.slice(0,8)}</td>
                   <td className="px-4 py-3 text-xs">{o.userName || "—"}</td>
-                  <td className="px-4 py-3 text-xs font-bold">${o.totalAmount?.toFixed(2)}</td>
+                  <td className="px-4 py-3 text-xs font-bold">{formatPrice(o.totalAmount ?? 0)}</td>
                   <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-100">{o.paymentMethod}</span></td>
-                  <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${o.status==="confirmed"?"bg-green-100 text-green-700":o.status==="shipped"?"bg-blue-100 text-blue-700":"bg-amber-100 text-amber-700"}`}>{o.status}</span></td>
+                  <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${o.status==="paid"||o.status==="delivered"?"bg-green-100 text-green-700":o.status==="failed"?"bg-red-100 text-red-700":"bg-amber-100 text-amber-700"}`}>{o.status ?? "pending"}</span></td>
                 </tr>
               ))}
             </tbody>

@@ -1,172 +1,251 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import emailjs from "@emailjs/browser";
-import { ADMIN_CREDS_KEY, DEFAULT_ADMIN_EMAIL, getAdminCreds } from "@/components/AdminLogin";
-
-const EMAILJS_SERVICE_ID = "service_ud4q3th";
-const EMAILJS_TEMPLATE_ID = "template_7xizeyl";
-const EMAILJS_PUBLIC_KEY = "lR0od57Crthfh4V1a";
-const SITE_CONFIG_KEY = "riotgear_site_config";
-
-const defaultConfig = {
-  brandName: "RIOTGEAR", brandAccent: "GEAR",
-  promoText: "FREE SHIPPING ON ORDERS OVER $50",
-  navMenu: [
-    { name: "Men", subcategories: ["Jerseys","Shorts","Training Kits","Jackets","Accessories"] },
-    { name: "Women", subcategories: ["Jerseys","Shorts","Training Kits","Jackets","Accessories"] },
-    { name: "Kids", subcategories: ["Jerseys","Shorts","Mini Kits","School Gear"] },
-    { name: "Jerseys", subcategories: ["Home Kits","Away Kits","Third Kits","Retro","Custom"] },
-    { name: "Teams", subcategories: ["Premier League","La Liga","Serie A","Bundesliga","African Teams"] },
-  ],
-  heroLeft: { tag: "New Season", title: "2025/26 Home Kits", desc: "Rep your team with the latest match-day jerseys.", btnText: "Shop Now" },
-  heroRight: { tag: "Limited Edition", title: "African Retro Collection", desc: "Classic designs inspired by legendary African football moments.", btnText: "Explore" },
-  footer: {
-    shop: [{text:"Men",url:"#"},{text:"Women",url:"#"},{text:"Kids",url:"#"},{text:"New Arrivals",url:"#"},{text:"Sale",url:"#"}],
-    teams: [{text:"Premier League",url:"#"},{text:"La Liga",url:"#"},{text:"Serie A",url:"#"},{text:"Bundesliga",url:"#"},{text:"African Teams",url:"#"}],
-    support: [{text:"Contact Us",url:"#"},{text:"Shipping Info",url:"#"},{text:"Returns",url:"#"},{text:"Size Guide",url:"#"},{text:"FAQ",url:"#"}],
-    connect: [{text:"Instagram",url:"#"},{text:"Twitter/X",url:"#"},{text:"TikTok",url:"#"},{text:"YouTube",url:"#"},{text:"Newsletter",url:"#"}],
-  },
-  rewards: [
-    {name:"5% Off Next Order",cost:50,icon:"🏷️"},{name:"Free Shipping",cost:30,icon:"🚚"},
-    {name:"10% Off Any Jersey",cost:100,icon:"👕"},{name:"Mystery Box Unlock",cost:200,icon:"🎁"},
-    {name:"VIP Early Access",cost:150,icon:"⭐"},{name:"Exclusive Retro Drop",cost:300,icon:"🔥"},
-  ],
-};
-
-export function getSiteConfig() {
-  if (typeof window === "undefined") return defaultConfig;
-  const s = localStorage.getItem(SITE_CONFIG_KEY);
-  if (s) try { return JSON.parse(s); } catch {}
-  return defaultConfig;
-}
+import { useState } from "react";
+import { BRAND, COMMERCE, SUPPORT } from "@/lib/config";
+import { categories } from "@/lib/categories";
+import {
+  ICON_OPTIONS,
+  TONE_OPTIONS,
+  useNotices,
+  type EditableNotice,
+} from "@/lib/notices";
+import Icon from "@/components/ui/Icon";
 
 export default function AdminSettingsPage() {
-  const [tab, setTab] = useState<"site"|"credentials">("site");
-  const [config, setConfig] = useState(defaultConfig);
+  // Edits persist to this browser as they are typed.
+  const { notices, update, reset } = useNotices();
   const [saved, setSaved] = useState(false);
-  const creds = getAdminCreds();
-  const [newEmail, setNewEmail] = useState(creds.email);
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [credStep, setCredStep] = useState<"form"|"otp"|"done">("form");
-  const [otp, setOtp] = useState("");
-  const [generatedOtp, setGeneratedOtp] = useState("");
-  const [credError, setCredError] = useState("");
-  const [sending, setSending] = useState(false);
 
-  useEffect(() => { setConfig(getSiteConfig()); }, []);
-
-  const saveConfig = () => { localStorage.setItem(SITE_CONFIG_KEY, JSON.stringify(config)); setSaved(true); setTimeout(()=>setSaved(false),2000); };
-
-  const updateFooterItem = (section: string, i: number, field: "text"|"url", value: string) => {
-    setConfig((p: any) => { const f={...p.footer}; f[section]=[...f[section]]; f[section][i]={...f[section][i],[field]:value}; return {...p,footer:f}; });
-  };
-  const updateNavItem = (i: number, field: string, value: string) => {
-    setConfig((p: any) => { const m=[...p.navMenu]; m[i]=field==="name"?{...m[i],name:value}:{...m[i],subcategories:value.split(",").map((s:string)=>s.trim())}; return {...p,navMenu:m}; });
-  };
-  const updateReward = (i: number, field: string, value: string) => {
-    setConfig((p: any) => { const r=[...p.rewards]; r[i]=field==="cost"?{...r[i],cost:parseInt(value)||0}:{...r[i],[field]:value}; return {...p,rewards:r}; });
+  const handleSave = () => {
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
   };
 
-  const handleRequestOTP = async (e: React.FormEvent) => {
-    e.preventDefault(); setCredError("");
-    if (!newEmail||!newPassword) { setCredError("Required."); return; }
-    if (newPassword!==confirmPassword) { setCredError("Mismatch."); return; }
-    if (newPassword.length<6) { setCredError("Min 6 chars."); return; }
-    const code = Math.floor(100000+Math.random()*900000).toString();
-    setGeneratedOtp(code); setSending(true);
-    try { await emailjs.send(EMAILJS_SERVICE_ID,EMAILJS_TEMPLATE_ID,{to_email:DEFAULT_ADMIN_EMAIL,otp_code:code,admin_name:"RiotGear Admin"},EMAILJS_PUBLIC_KEY); }
-    catch { alert(`OTP: ${code}`); }
-    setSending(false); setCredStep("otp");
-  };
-  const handleVerifyOTP = (e: React.FormEvent) => {
-    e.preventDefault(); setCredError("");
-    if (otp!==generatedOtp) { setCredError("Invalid OTP."); return; }
-    localStorage.setItem(ADMIN_CREDS_KEY, JSON.stringify({email:newEmail,password:newPassword}));
-    setCredStep("done");
-  };
+  const inputClass =
+    "w-full px-3 py-2 rounded-xl border border-[var(--color-line)] bg-[var(--color-page)] text-sm outline-none focus:border-[var(--color-brand)]";
+  const labelClass =
+    "block text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-faint)] mb-1";
+  const cardClass =
+    "bg-[var(--color-panel)] rounded-2xl border border-[var(--color-line)] p-5";
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-1">Admin Settings</h1>
-      <p className="text-sm text-gray-500 mb-6">Manage site content, branding & credentials</p>
-      <div className="flex gap-1 mb-6 border-b">
-        <button onClick={()=>setTab("site")} className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 ${tab==="site"?"border-[var(--color-gold)] text-[var(--color-charcoal)]":"border-transparent text-gray-400"}`}>Site Content</button>
-        <button onClick={()=>setTab("credentials")} className={`px-4 py-2 text-xs font-bold uppercase tracking-wider border-b-2 ${tab==="credentials"?"border-[var(--color-gold)] text-[var(--color-charcoal)]":"border-transparent text-gray-400"}`}>Credentials</button>
+      <div className="mb-6">
+        <h1 className="text-2xl font-extrabold">Store Settings</h1>
+        <p className="text-sm text-[var(--color-ink-soft)] mt-0.5">
+          Announcements, branding and support channels
+        </p>
       </div>
 
-      {tab==="site" ? (
-        <div className="space-y-6 max-w-3xl">
-          {/* Brand */}
-          <div className="bg-white rounded-lg border p-5">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-4">Brand & Promo Bar</h2>
-            <div className="grid grid-cols-2 gap-3 mb-3">
-              <div><label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Brand Name</label><input value={config.brandName} onChange={e=>setConfig({...config,brandName:e.target.value})} className="w-full border px-3 py-2 text-sm" /></div>
-              <div><label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Accent Word</label><input value={config.brandAccent} onChange={e=>setConfig({...config,brandAccent:e.target.value})} className="w-full border px-3 py-2 text-sm" /></div>
-            </div>
-            <div><label className="block text-[10px] font-bold uppercase text-gray-400 mb-1">Promo Bar Text</label><input value={config.promoText} onChange={e=>setConfig({...config,promoText:e.target.value})} className="w-full border px-3 py-2 text-sm" /></div>
+      <div className="space-y-5 max-w-3xl">
+        {/* Announcement cards */}
+        <div className={cardClass}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)]">
+              Announcement Cards
+            </h2>
+            <button
+              type="button"
+              onClick={() => {
+                reset();
+                setSaved(false);
+              }}
+              className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-brand)] hover:underline"
+            >
+              Reset
+            </button>
           </div>
-          {/* Nav */}
-          <div className="bg-white rounded-lg border p-5">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-4">Navigation Menu</h2>
-            <div className="space-y-2">
-              {config.navMenu.map((item: any,i: number)=>(
-                <div key={i} className="grid grid-cols-3 gap-2">
-                  <input value={item.name} onChange={e=>updateNavItem(i,"name",e.target.value)} className="border px-2 py-1.5 text-xs font-bold" />
-                  <input value={item.subcategories.join(", ")} onChange={e=>updateNavItem(i,"sub",e.target.value)} className="col-span-2 border px-2 py-1.5 text-xs" placeholder="Comma separated" />
+
+          <p className="text-[11px] text-[var(--color-ink-soft)] mb-4 leading-relaxed">
+            These drive the sliding notice carousel on the storefront. Edits
+            save to this browser as you type and appear immediately.
+          </p>
+
+          <div className="space-y-4">
+            {notices.map((notice, i) => (
+              <div
+                key={notice.id}
+                className="rounded-xl border border-[var(--color-line)] p-3.5"
+              >
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className={labelClass}>Icon</label>
+                    <select
+                      value={notice.icon}
+                      onChange={(e) =>
+                        update(i, { icon: e.target.value as EditableNotice["icon"] })
+                      }
+                      className={inputClass}
+                    >
+                      {ICON_OPTIONS.map((icon) => (
+                        <option key={icon} value={icon}>
+                          {icon}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>Tone</label>
+                    <select
+                      value={notice.tone}
+                      onChange={(e) =>
+                        update(i, { tone: e.target.value as EditableNotice["tone"] })
+                      }
+                      className={inputClass}
+                    >
+                      {TONE_OPTIONS.map((tone) => (
+                        <option key={tone} value={tone}>
+                          {tone}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
-          {/* Hero */}
-          <div className="bg-white rounded-lg border p-5">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-4">Hero Banners</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="border rounded p-3"><p className="text-[10px] font-bold text-[var(--color-gold)] uppercase mb-2">Left (Shop)</p>
-                <div className="space-y-2"><input value={config.heroLeft.tag} onChange={e=>setConfig({...config,heroLeft:{...config.heroLeft,tag:e.target.value}})} placeholder="Tag" className="w-full border px-2 py-1.5 text-xs" /><input value={config.heroLeft.title} onChange={e=>setConfig({...config,heroLeft:{...config.heroLeft,title:e.target.value}})} placeholder="Title" className="w-full border px-2 py-1.5 text-xs" /><input value={config.heroLeft.desc} onChange={e=>setConfig({...config,heroLeft:{...config.heroLeft,desc:e.target.value}})} placeholder="Description" className="w-full border px-2 py-1.5 text-xs" /><input value={config.heroLeft.btnText} onChange={e=>setConfig({...config,heroLeft:{...config.heroLeft,btnText:e.target.value}})} placeholder="Button" className="w-full border px-2 py-1.5 text-xs" /></div>
+
+                <div className="space-y-3">
+                  <div>
+                    <label className={labelClass}>Title</label>
+                    <input
+                      value={notice.title}
+                      onChange={(e) => update(i, { title: e.target.value })}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Body</label>
+                    <textarea
+                      value={notice.body}
+                      onChange={(e) => update(i, { body: e.target.value })}
+                      rows={2}
+                      className={`${inputClass} resize-none`}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className={labelClass}>Link (optional)</label>
+                      <input
+                        value={notice.href ?? ""}
+                        onChange={(e) => update(i, { href: e.target.value })}
+                        placeholder="https://t.me/…"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass}>Link label</label>
+                      <input
+                        value={notice.cta ?? ""}
+                        onChange={(e) => update(i, { cta: e.target.value })}
+                        placeholder="Open Telegram"
+                        className={inputClass}
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="border rounded p-3"><p className="text-[10px] font-bold text-[var(--color-gold)] uppercase mb-2">Right (Explore)</p>
-                <div className="space-y-2"><input value={config.heroRight.tag} onChange={e=>setConfig({...config,heroRight:{...config.heroRight,tag:e.target.value}})} placeholder="Tag" className="w-full border px-2 py-1.5 text-xs" /><input value={config.heroRight.title} onChange={e=>setConfig({...config,heroRight:{...config.heroRight,title:e.target.value}})} placeholder="Title" className="w-full border px-2 py-1.5 text-xs" /><input value={config.heroRight.desc} onChange={e=>setConfig({...config,heroRight:{...config.heroRight,desc:e.target.value}})} placeholder="Description" className="w-full border px-2 py-1.5 text-xs" /><input value={config.heroRight.btnText} onChange={e=>setConfig({...config,heroRight:{...config.heroRight,btnText:e.target.value}})} placeholder="Button" className="w-full border px-2 py-1.5 text-xs" /></div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            className={`mt-4 w-full py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-colors ${
+              saved
+                ? "bg-[var(--color-success)] text-white"
+                : "bg-[var(--color-ink)] text-[var(--color-panel)] hover:opacity-90"
+            }`}
+          >
+            {saved ? "Saved" : "Announcements are live"}
+          </button>
+        </div>
+
+        {/* Branding reference */}
+        <div className={cardClass}>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)] mb-4">
+            Brand
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="rounded-xl bg-[var(--color-page)] p-3">
+              <p className={labelClass}>Store name</p>
+              <p className="text-sm font-bold">{BRAND.fullName}</p>
+            </div>
+            <div className="rounded-xl bg-[var(--color-page)] p-3">
+              <p className={labelClass}>Currency</p>
+              <p className="text-sm font-bold">
+                {COMMERCE.symbol} {COMMERCE.currency}
+              </p>
+            </div>
+          </div>
+          <p className="text-[11px] text-[var(--color-ink-soft)] mt-3 leading-relaxed">
+            Branding lives in <code>src/lib/config.ts</code> so it is compiled
+            into the static build. Edit that file and redeploy to change it.
+          </p>
+        </div>
+
+        {/* Support channels */}
+        <div className={cardClass}>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)] mb-4">
+            Support Channels
+          </h2>
+          <div className="space-y-2">
+            {[
+              { icon: "whatsapp" as const, label: "WhatsApp", value: SUPPORT.whatsappDisplay },
+              { icon: "telegram" as const, label: "Telegram", value: `@${SUPPORT.telegram}` },
+              { icon: "headset" as const, label: "Email", value: SUPPORT.email },
+            ].map((row) => (
+              <div
+                key={row.label}
+                className="flex items-center gap-3 rounded-xl bg-[var(--color-page)] p-3"
+              >
+                <Icon name={row.icon} className="w-4 h-4 text-[var(--color-brand)]" />
+                <span className="text-xs font-bold flex-1">{row.label}</span>
+                <span className="text-xs text-[var(--color-ink-soft)]">
+                  {row.value}
+                </span>
               </div>
-            </div>
+            ))}
           </div>
-          {/* Footer */}
-          <div className="bg-white rounded-lg border p-5">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-4">Footer Links</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {["shop","teams","support","connect"].map(section=>(
-                <div key={section} className="border rounded p-3"><p className="text-[10px] font-bold text-[var(--color-gold)] uppercase mb-2">{section}</p>
-                  <div className="space-y-1.5">{(config.footer as any)[section].map((item: any,i: number)=>(
-                    <div key={i} className="flex gap-1.5"><input value={item.text} onChange={e=>updateFooterItem(section,i,"text",e.target.value)} className="w-1/2 border px-2 py-1 text-[11px]" placeholder="Label" /><input value={item.url} onChange={e=>updateFooterItem(section,i,"url",e.target.value)} className="w-1/2 border px-2 py-1 text-[11px]" placeholder="URL" /></div>
-                  ))}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-          {/* Rewards */}
-          <div className="bg-white rounded-lg border p-5">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-4">Rewards / Coins Cost</h2>
-            <div className="space-y-2">
-              {config.rewards.map((r: any,i: number)=>(
-                <div key={i} className="grid grid-cols-4 gap-2 items-center">
-                  <input value={r.icon} onChange={e=>updateReward(i,"icon",e.target.value)} className="border px-2 py-1.5 text-center text-sm" />
-                  <input value={r.name} onChange={e=>updateReward(i,"name",e.target.value)} className="col-span-2 border px-2 py-1.5 text-xs" />
-                  <input value={r.cost} onChange={e=>updateReward(i,"cost",e.target.value)} type="number" className="border px-2 py-1.5 text-xs text-center font-bold" />
-                </div>
-              ))}
-              <p className="text-[10px] text-gray-400">Icon | Name | Coin Cost</p>
-            </div>
-          </div>
-          <button onClick={saveConfig} className={`w-full py-3 text-sm font-bold uppercase tracking-[0.2em] ${saved?"bg-green-600 text-white":"bg-[var(--color-charcoal)] text-white hover:bg-[var(--color-accent)]"}`}>{saved?"✓ Saved":"Save All Site Settings"}</button>
+          <p className="text-[11px] text-[var(--color-ink-soft)] mt-3 leading-relaxed">
+            Also in <code>src/lib/config.ts</code>. The floating support button,
+            footer and cart all read from there.
+          </p>
         </div>
-      ) : (
-        <div className="max-w-lg bg-white rounded-lg border p-6">
-          {credStep==="done"?<div className="text-center py-8"><div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4"><svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg></div><p className="font-bold">Credentials Updated</p></div>
-          :credStep==="otp"?<div><h2 className="font-bold text-sm uppercase mb-2">Verify OTP</h2><p className="text-xs text-gray-500 mb-4">Sent to {DEFAULT_ADMIN_EMAIL}</p>{credError&&<div className="mb-3 p-2 bg-red-50 text-red-700 text-xs rounded">{credError}</div>}<form onSubmit={handleVerifyOTP}><input type="text" value={otp} onChange={e=>setOtp(e.target.value)} maxLength={6} placeholder="000000" className="w-full border px-4 py-3 text-lg text-center font-mono tracking-[0.5em] mb-3" /><button type="submit" className="w-full bg-[var(--color-charcoal)] text-white py-3 text-sm font-bold uppercase">Verify</button></form></div>
-          :<div><h2 className="font-bold text-sm uppercase mb-4">Change Credentials</h2>{credError&&<div className="mb-3 p-2 bg-red-50 text-red-700 text-xs rounded">{credError}</div>}<form onSubmit={handleRequestOTP} className="space-y-3"><input type="email" value={newEmail} onChange={e=>setNewEmail(e.target.value)} required placeholder="New Email" className="w-full border px-3 py-2.5 text-sm" /><input type="password" value={newPassword} onChange={e=>setNewPassword(e.target.value)} required minLength={6} placeholder="New Password" className="w-full border px-3 py-2.5 text-sm" /><input type="password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} required placeholder="Confirm" className="w-full border px-3 py-2.5 text-sm" /><button type="submit" disabled={sending} className="w-full bg-[var(--color-charcoal)] text-white py-3 text-sm font-bold uppercase disabled:opacity-50">{sending?"Sending...":"Send OTP & Update"}</button></form></div>}
+
+        {/* Categories reference */}
+        <div className={cardClass}>
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)] mb-4">
+            Catalog Categories
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {categories.map((c) => (
+              <span
+                key={c.id}
+                className={`px-3 py-1.5 rounded-full text-[11px] font-bold text-white bg-gradient-to-r ${c.gradient}`}
+              >
+                {c.icon} {c.name}
+              </span>
+            ))}
+          </div>
+          <p className="text-[11px] text-[var(--color-ink-soft)] mt-3 leading-relaxed">
+            Defined in <code>src/lib/categories.ts</code>. Product counts are
+            managed under Products.
+          </p>
         </div>
-      )}
+
+        {/* Security note */}
+        <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-page)] p-4 flex items-start gap-3">
+          <Icon
+            name="shield"
+            className="w-4 h-4 text-[var(--color-success)] flex-shrink-0 mt-0.5"
+          />
+          <p className="text-[11px] text-[var(--color-ink-soft)] leading-relaxed">
+            Admin access is now gated by Google sign-in against an allowlist in{" "}
+            <code>src/lib/config.ts</code>. The old stored-credential and OTP
+            flow was removed — it kept passwords in the browser, which is not
+            safe. Enforce the same allowlist in your Firestore security rules,
+            since a client-side gate can be bypassed.
+          </p>
+        </div>
+      </div>
     </div>
   );
 }

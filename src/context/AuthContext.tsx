@@ -8,6 +8,7 @@ import {
   signOut as firebaseSignOut,
 } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
+import { errorMessage } from "@/lib/orders";
 
 interface AuthContextType {
   user: User | null;
@@ -34,8 +35,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       await signInWithPopup(auth, googleProvider);
       // Redirect to home is handled by the sign-in page
-    } catch (error: any) {
-      console.error("Google sign-in error:", error.message);
+    } catch (error: unknown) {
+      console.error("Google sign-in error:", errorMessage(error));
       throw error;
     }
   };
@@ -43,8 +44,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     try {
       await firebaseSignOut(auth);
-    } catch (error: any) {
-      console.error("Sign-out error:", error.message);
+    } catch (error: unknown) {
+      console.error("Sign-out error:", errorMessage(error));
     }
   };
 

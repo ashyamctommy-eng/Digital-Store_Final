@@ -1,76 +1,51 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
+import { useTheme } from "@/context/ThemeContext";
+import { useStore } from "@/lib/browserStore";
 
-const THEME_KEY = "riotgear_theme";
-const COINS_KEY = "riotgear_coins";
-const VIBE_KEY = "riotgear_last_vibe";
+const COINS_KEY = "dhs.coins";
+const VIBE_KEY = "dhs.lastVibe";
+/** Module-level defaults keep the store snapshots referentially stable. */
+const NO_COINS = 0;
+const NO_VIBE = "";
 
 export default function AccountSettingsPage() {
   const { user, loading: authLoading } = useAuth();
-  const [darkMode, setDarkMode] = useState(false);
-  const [coins, setCoins] = useState(0);
-  const [canVibe, setCanVibe] = useState(false);
+  const { theme, toggleTheme } = useTheme();
+  const darkMode = theme === "dark";
+  const [coins, setCoins] = useStore<number>(COINS_KEY, NO_COINS);
+  const [lastVibe, setLastVibe] = useStore<string>(VIBE_KEY, NO_VIBE);
   const [vibeAnimation, setVibeAnimation] = useState(false);
   const [earnedToday, setEarnedToday] = useState(0);
 
-  useEffect(() => {
-    // Load theme
-    const stored = localStorage.getItem(THEME_KEY);
-    if (stored === "dark") {
-      setDarkMode(true);
-      document.documentElement.classList.add("dark");
-    }
-    // Load coins
-    const storedCoins = localStorage.getItem(COINS_KEY);
-    setCoins(storedCoins ? parseInt(storedCoins) : 0);
-    // Check if can vibe today
-    const lastVibe = localStorage.getItem(VIBE_KEY);
-    const today = new Date().toDateString();
-    setCanVibe(lastVibe !== today);
-  }, []);
-
-  const toggleTheme = () => {
-    const newMode = !darkMode;
-    setDarkMode(newMode);
-    if (newMode) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem(THEME_KEY, "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem(THEME_KEY, "light");
-    }
-  };
+  const today = new Date().toDateString();
+  const canVibe = lastVibe !== today;
 
   const handleVibeCheck = () => {
     if (!canVibe) return;
     setVibeAnimation(true);
     const earned = Math.floor(Math.random() * 15) + 5; // 5-20 coins
-    const newBalance = coins + earned;
-    setCoins(newBalance);
+    setCoins(coins + earned);
     setEarnedToday(earned);
-    setCanVibe(false);
-    localStorage.setItem(COINS_KEY, String(newBalance));
-    localStorage.setItem(VIBE_KEY, new Date().toDateString());
+    setLastVibe(today);
     setTimeout(() => setVibeAnimation(false), 2000);
   };
 
   const rewards = [
     { name: "5% Off Next Order", cost: 50, icon: "🏷️" },
-    { name: "Free Shipping", cost: 30, icon: "🚚" },
-    { name: "10% Off Any Jersey", cost: 100, icon: "👕" },
-    { name: "Mystery Box Unlock", cost: 200, icon: "🎁" },
-    { name: "VIP Early Access", cost: 150, icon: "⭐" },
-    { name: "Exclusive Retro Drop", cost: 300, icon: "🔥" },
+    { name: "Free SMS Verification", cost: 30, icon: "📲" },
+    { name: "10% Off Any Account", cost: 100, icon: "🔐" },
+    { name: "Free Proxy Trial (1GB)", cost: 200, icon: "🌐" },
+    { name: "VIP Early Stock Access", cost: 150, icon: "⭐" },
+    { name: "Free VPN — 1 Month", cost: 300, icon: "🛡️" },
   ];
 
   const redeemReward = (cost: number, name: string) => {
     if (coins < cost) return;
-    const newBalance = coins - cost;
-    setCoins(newBalance);
-    localStorage.setItem(COINS_KEY, String(newBalance));
+    setCoins(coins - cost);
     alert(`🎉 Redeemed: ${name}\n\nYour discount code will be applied at checkout.`);
   };
 
@@ -79,7 +54,7 @@ export default function AccountSettingsPage() {
   if (!user) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--color-cream)] px-4">
-        <h1 className="font-[var(--font-oswald)] text-2xl font-bold mb-2">Sign In Required</h1>
+        <h1 className="text-2xl font-bold mb-2">Sign In Required</h1>
         <p className="text-sm text-gray-500 mb-4">Please sign in to access account settings.</p>
         <Link href="/auth/signin/" className="bg-[var(--color-charcoal)] text-white px-6 py-3 text-xs font-bold uppercase tracking-wider">Sign In</Link>
       </div>
@@ -91,7 +66,7 @@ export default function AccountSettingsPage() {
       {/* Header */}
       <div className="bg-white dark:bg-gray-800 border-b dark:border-gray-700 sticky top-0 z-40">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/" className="font-[var(--font-oswald)] text-xl font-bold uppercase text-[var(--color-charcoal)] dark:text-white">RIOT<span className="text-[var(--color-accent)]">GEAR</span></Link>
+          <Link href="/" className="text-xl font-bold uppercase text-[var(--color-charcoal)] dark:text-white">DIGITAL<span className="text-[var(--color-accent)]">HUB SHOP</span></Link>
           <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Settings</h2>
         </div>
       </div>
@@ -101,6 +76,7 @@ export default function AccountSettingsPage() {
         <div className="bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700 p-5">
           <div className="flex items-center gap-4">
             {user.photoURL ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img src={user.photoURL} alt="" className="w-14 h-14 rounded-full border-2 border-[var(--color-gold)]" />
             ) : (
               <div className="w-14 h-14 rounded-full bg-[var(--color-charcoal)] text-white flex items-center justify-center text-xl font-bold">{user.displayName?.charAt(0) || "U"}</div>
@@ -141,11 +117,11 @@ export default function AccountSettingsPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-[var(--color-gold)]">Daily Vibe Check</h2>
-              <p className="text-[10px] text-gray-400 mt-0.5">Check in daily to earn RiotCoins</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">Check in daily to earn HubCoins</p>
             </div>
             <div className="text-right">
               <p className="text-2xl font-bold text-[var(--color-gold)]">{coins}</p>
-              <p className="text-[9px] uppercase tracking-wider text-gray-400">RiotCoins</p>
+              <p className="text-[9px] uppercase tracking-wider text-gray-400">HubCoins</p>
             </div>
           </div>
 
@@ -159,7 +135,7 @@ export default function AccountSettingsPage() {
           ) : (
             <div className={`w-full py-4 text-center rounded ${vibeAnimation ? "bg-green-500/20 border border-green-400/30" : "bg-white/5 border border-white/10"}`}>
               {vibeAnimation ? (
-                <p className="text-green-400 font-bold text-sm">+{earnedToday} RiotCoins Earned! 🎉</p>
+                <p className="text-green-400 font-bold text-sm">+{earnedToday} HubCoins Earned! 🎉</p>
               ) : (
                 <p className="text-gray-400 text-xs">Vibe checked today! Come back tomorrow 💫</p>
               )}
@@ -179,7 +155,7 @@ export default function AccountSettingsPage() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Rewards Store</h2>
-              <p className="text-[10px] text-gray-400 mt-0.5">Swap your RiotCoins for discounts</p>
+              <p className="text-[10px] text-gray-400 mt-0.5">Swap your HubCoins for discounts</p>
             </div>
             <span className="text-xs font-bold text-[var(--color-gold)]">{coins} coins</span>
           </div>

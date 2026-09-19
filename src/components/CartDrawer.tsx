@@ -1,164 +1,244 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useCart } from "@/context/CartContext";
-import ShippingForm, { ShippingAddress } from "./ShippingForm";
+import { useAuth } from "@/context/AuthContext";
+import DeliveryForm from "./DeliveryForm";
 import CheckoutOptions from "./CheckoutButtons";
+import Icon from "./ui/Icon";
+import { asset } from "@/lib/asset";
+import { formatPrice } from "@/lib/format";
+import { DELIVERY } from "@/lib/config";
+import type { DeliveryDetails } from "@/lib/orders";
+import { setBodyScrollLock } from "@/lib/browserStore";
 
-type Step = "cart" | "shipping" | "payment";
+type Step = "cart" | "details" | "payment";
 
+/**
+ * Slide-in cart with a two-step digital checkout:
+ * cart → delivery details → payment. No shipping step any more.
+ */
 export default function CartDrawer() {
-  const { items, removeFromCart, updateQuantity, totalItems, totalPrice, isCartOpen, setIsCartOpen } = useCart();
+  const {
+    items,
+    removeFromCart,
+    updateQuantity,
+    totalItems,
+    totalPrice,
+    isCartOpen,
+    setIsCartOpen,
+    lastAddedId,
+  } = useCart();
+  const { user } = useAuth();
+
   const [step, setStep] = useState<Step>("cart");
-  const [shippingAddress, setShippingAddress] = useState<ShippingAddress | null>(null);
+  const [details, setDetails] = useState<DeliveryDetails | null>(null);
+
+  const close = useCallback(() => {
+    setIsCartOpen(false);
+    // Reset after the exit so the drawer does not flash the first step.
+    setTimeout(() => setStep("cart"), 250);
+  }, [setIsCartOpen]);
+
+  // Lock body scroll and close on Escape while open.
+  useEffect(() => {
+    if (!isCartOpen) return;
+    setBodyScrollLock(true);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      setBodyScrollLock(false);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [isCartOpen, close]);
 
   if (!isCartOpen) return null;
 
-  const handleClose = () => {
-    setIsCartOpen(false);
-    // Reset to cart step after a delay so animation is smooth
-    setTimeout(() => setStep("cart"), 300);
-  };
-
-  const handleShippingSubmit = (address: ShippingAddress) => {
-    setShippingAddress(address);
-    setStep("payment");
+  const titles: Record<Step, string> = {
+    cart: `Your Cart (${totalItems})`,
+    details: "Delivery Details",
+    payment: "Payment",
   };
 
   return (
     <>
-      {/* Overlay */}
-      <div
-        className="fixed inset-0 bg-black/50 z-[60]"
-        onClick={handleClose}
-      />
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60]" onClick={close} />
 
-      {/* Drawer */}
-      <div className="fixed top-0 right-0 h-full w-full max-w-md bg-white z-[70] shadow-2xl flex flex-col overflow-hidden">
+      <div className="fixed top-0 right-0 h-full w-full max-w-md bg-[var(--color-panel)] z-[70] shadow-2xl flex flex-col animate-slide-in-right">
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b flex-shrink-0">
-          <h2 className="font-bold text-lg uppercase">
-            {step === "cart" && `Your Cart (${totalItems})`}
-            {step === "shipping" && "Shipping Info"}
-            {step === "payment" && "Payment"}
+        <div className="flex items-center gap-2 p-4 border-b border-[var(--color-line)] flex-shrink-0">
+          {step !== "cart" && (
+            <button
+              type="button"
+              onClick={() => setStep(step === "payment" ? "details" : "cart")}
+              aria-label="Back"
+              className="p-1.5 rounded-full hover:bg-[var(--color-line)] transition-colors"
+            >
+              <Icon name="chevronLeft" className="w-4 h-4" />
+            </button>
+          )}
+          <h2 className="font-bold text-sm uppercase tracking-wider flex-1">
+            {titles[step]}
           </h2>
           <button
-            onClick={handleClose}
-            className="p-2 hover:bg-gray-100 rounded"
+            type="button"
+            onClick={close}
             aria-label="Close cart"
+            className="p-1.5 rounded-full hover:bg-[var(--color-line)] transition-colors"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Icon name="close" className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Content */}
+        {/* Body */}
         <div className="flex-1 overflow-y-auto p-4">
-          {/* STEP 1: Cart Items */}
-          {step === "cart" && (
-            <>
-              {items.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                  <svg className="w-16 h-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
-                  </svg>
-                  <p className="text-gray-500 font-medium">Your cart is empty</p>
-                  <p className="text-sm text-gray-400 mt-1">Add some jerseys to get started!</p>
-                  <button
-                    onClick={handleClose}
-                    className="mt-4 bg-black text-white px-6 py-2 font-bold text-sm uppercase"
-                  >
-                    Continue Shopping
-                  </button>
+          {/* ---------------- Step 1: items ---------------- */}
+          {step === "cart" &&
+            (items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center">
+                <div className="w-16 h-16 rounded-full bg-[var(--color-line)] flex items-center justify-center mb-4">
+                  <Icon
+                    name="cart"
+                    className="w-7 h-7 text-[var(--color-ink-faint)]"
+                  />
                 </div>
-              ) : (
-                <ul className="space-y-4">
-                  {items.map((item) => (
-                    <li key={item.id} className="flex gap-3 border-b pb-4">
+                <p className="font-bold">Your cart is empty</p>
+                <p className="text-xs text-[var(--color-ink-soft)] mt-1">
+                  Browse accounts, VPNs and proxies to get started.
+                </p>
+                <button
+                  type="button"
+                  onClick={close}
+                  className="mt-5 px-6 py-2.5 rounded-xl bg-[var(--color-brand)] text-white text-xs font-bold uppercase tracking-wider"
+                >
+                  Continue Shopping
+                </button>
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {items.map((item) => (
+                  <li
+                    key={item.id}
+                    className={`flex gap-3 p-3 rounded-2xl border transition-colors ${
+                      lastAddedId === item.id
+                        ? "border-[var(--color-brand)]/40 bg-[var(--color-brand)]/5"
+                        : "border-[var(--color-line)]"
+                    }`}
+                  >
+                    <Link
+                      href={`/products/${item.slug}/`}
+                      onClick={close}
+                      className="w-16 h-16 rounded-xl bg-[var(--color-page)] flex items-center justify-center flex-shrink-0 overflow-hidden"
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
-                        src={item.image}
+                        src={asset(item.image)}
                         alt={item.name}
-                        className="w-20 h-20 object-cover bg-gray-100 flex-shrink-0"
+                        className="w-full h-full object-contain p-1.5"
                       />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-gray-500 font-bold uppercase">{item.team}</p>
-                        <h4 className="text-sm font-medium truncate">{item.name}</h4>
-                        <p className="font-bold mt-1">${(item.price * item.quantity).toFixed(2)}</p>
-                        <div className="flex items-center gap-2 mt-2">
+                    </Link>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[9px] font-extrabold uppercase tracking-wider text-[var(--color-brand)]">
+                        {item.category}
+                      </p>
+                      <h4 className="text-xs font-semibold leading-snug line-clamp-2 mt-0.5">
+                        {item.name}
+                      </h4>
+                      <p className="text-sm font-extrabold mt-1 tabular-nums">
+                        {formatPrice(item.price * item.quantity)}
+                      </p>
+
+                      <div className="flex items-center gap-2 mt-2">
+                        <div className="flex items-center rounded-full border border-[var(--color-line)]">
                           <button
-                            onClick={() => updateQuantity(item.id, item.quantity - 1)}
-                            className="w-7 h-7 border flex items-center justify-center text-sm font-bold hover:bg-gray-100"
+                            type="button"
+                            onClick={() =>
+                              updateQuantity(item.id, item.quantity - 1)
+                            }
+                            aria-label="Decrease quantity"
+                            className="w-7 h-7 flex items-center justify-center hover:text-[var(--color-brand)] transition-colors"
                           >
-                            -
+                            <Icon name="minus" className="w-3 h-3" />
                           </button>
-                          <span className="text-sm font-bold w-6 text-center">{item.quantity}</span>
+                          <span className="w-6 text-center text-xs font-bold tabular-nums">
+                            {item.quantity}
+                          </span>
                           <button
-                            onClick={() => updateQuantity(item.id, item.quantity + 1)}
-                            className="w-7 h-7 border flex items-center justify-center text-sm font-bold hover:bg-gray-100"
+                            type="button"
+                            onClick={() =>
+                              updateQuantity(item.id, item.quantity + 1)
+                            }
+                            aria-label="Increase quantity"
+                            className="w-7 h-7 flex items-center justify-center hover:text-[var(--color-brand)] transition-colors"
                           >
-                            +
-                          </button>
-                          <button
-                            onClick={() => removeFromCart(item.id)}
-                            className="ml-auto text-red-600 text-xs font-bold hover:underline"
-                          >
-                            Remove
+                            <Icon name="plus" className="w-3 h-3" />
                           </button>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFromCart(item.id)}
+                          aria-label={`Remove ${item.name}`}
+                          className="ml-auto p-1.5 rounded-full text-[var(--color-ink-faint)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 transition-colors"
+                        >
+                          <Icon name="trash" className="w-3.5 h-3.5" />
+                        </button>
                       </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </>
-          )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ))}
 
-          {/* STEP 2: Shipping Form */}
-          {step === "shipping" && (
-            <ShippingForm
-              onSubmit={handleShippingSubmit}
+          {/* ---------------- Step 2: details ---------------- */}
+          {step === "details" && (
+            <DeliveryForm
               onBack={() => setStep("cart")}
+              onSubmit={(d) => {
+                setDetails(d);
+                setStep("payment");
+              }}
+              initial={{
+                fullName: user?.displayName ?? "",
+                email: user?.email ?? "",
+              }}
             />
           )}
 
-          {/* STEP 3: Payment Options */}
-          {step === "payment" && shippingAddress && (
-            <div>
-              <div className="flex items-center gap-2 mb-4">
-                <button
-                  onClick={() => setStep("shipping")}
-                  className="p-1 hover:bg-gray-100 rounded"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                  </svg>
-                </button>
-                <p className="text-xs text-gray-500">
-                  Delivering to <span className="font-bold text-black">{shippingAddress.fullName}</span> in {shippingAddress.city}, {shippingAddress.country}
-                </p>
-              </div>
-              <CheckoutOptions amount={totalPrice} address={shippingAddress} />
-            </div>
+          {/* ---------------- Step 3: payment ---------------- */}
+          {step === "payment" && details && (
+            <CheckoutOptions amount={totalPrice} details={details} />
           )}
         </div>
 
-        {/* Footer — only show on cart step with items */}
+        {/* Footer — order summary on the cart step only */}
         {step === "cart" && items.length > 0 && (
-          <div className="border-t p-4 flex-shrink-0">
-            <div className="flex justify-between items-center mb-3">
-              <span className="font-bold uppercase text-sm">Subtotal</span>
-              <span className="font-bold text-xl">${totalPrice.toFixed(2)}</span>
+          <div className="border-t border-[var(--color-line)] p-4 flex-shrink-0 space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-[var(--color-ink-soft)]">
+                Subtotal ({totalItems} {totalItems === 1 ? "item" : "items"})
+              </span>
+              <span className="font-extrabold text-lg tabular-nums">
+                {formatPrice(totalPrice)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] text-[var(--color-ink-soft)]">
+              <Icon
+                name="bolt"
+                className="w-3.5 h-3.5 text-[var(--color-success)]"
+              />
+              {DELIVERY.detail}
             </div>
             <button
-              onClick={() => setStep("shipping")}
-              className="w-full bg-black text-white font-bold py-3 text-sm uppercase tracking-wider hover:bg-red-600 transition-colors"
+              type="button"
+              onClick={() => setStep("details")}
+              className="w-full py-3.5 rounded-xl bg-[var(--color-brand)] hover:bg-[var(--color-brand-strong)] text-white text-sm font-extrabold uppercase tracking-wider transition-colors"
             >
               Proceed to Checkout
             </button>
-            <p className="text-[10px] text-gray-400 text-center mt-2">
-              Free shipping on orders over $50
-            </p>
           </div>
         )}
       </div>

@@ -1,97 +1,133 @@
+"use client";
+
 import { CartItem } from "@/context/CartContext";
-import { ShippingAddress } from "@/components/ShippingForm";
+import type { DeliveryDetails } from "./orders";
+import { BRAND, COMMERCE, SUPPORT } from "./config";
 
-// ============================================================
-// WHATSAPP CHECKOUT
-// Sends order summary + shipping address to seller via WhatsApp
-// ============================================================
-const SELLER_WHATSAPP = "254717702563";
+/** Human-readable order reference, e.g. DHS-8F3K2Q. */
+export function generateOrderRef(): string {
+  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `DHS-${random}`;
+}
 
-export function checkoutViaWhatsApp(
+/** Builds the plain-text order summary shared by all manual channels. */
+export function buildOrderSummary(
+  ref: string,
   items: CartItem[],
-  totalPrice: number,
-  address: ShippingAddress
-) {
-  const orderLines = items
+  total: number,
+  details: DeliveryDetails
+): string {
+  const lines = items
     .map(
       (item, i) =>
-        `${i + 1}. ${item.name} (${item.team}) x${item.quantity} - $${(item.price * item.quantity).toFixed(2)}`
+        `${i + 1}. ${item.name} x${item.quantity} — ${COMMERCE.symbol} ${(
+          item.price * item.quantity
+        ).toLocaleString()}`
     )
     .join("\n");
 
-  const message = `🛒 *NEW ORDER - RiotGear Store*\n\n` +
-    `*Order Items:*\n${orderLines}\n\n` +
-    `*Total: $${totalPrice.toFixed(2)}*\n\n` +
-    `📦 *Shipping Details:*\n` +
-    `Name: ${address.fullName}\n` +
-    `Phone: ${address.phone}\n` +
-    `Email: ${address.email}\n` +
-    `Address: ${address.address}\n` +
-    `City: ${address.city}\n` +
-    `Country: ${address.country}\n` +
-    `${address.notes ? `Notes: ${address.notes}\n` : ""}` +
-    `\n---\nSent from RiotGear Store`;
+  return (
+    `🛒 *NEW ORDER — ${BRAND.fullName}*\n` +
+    `Ref: *${ref}*\n\n` +
+    `*Items*\n${lines}\n\n` +
+    `*Total: ${COMMERCE.symbol} ${total.toLocaleString()} ${COMMERCE.currency}*\n\n` +
+    `👤 *Delivery Details*\n` +
+    `Name: ${details.fullName}\n` +
+    `Email: ${details.email}\n` +
+    `WhatsApp: ${details.whatsapp}\n` +
+    `Country: ${details.country}\n` +
+    `${details.notes ? `Notes: ${details.notes}\n` : ""}` +
+    `\n---\nSent from ${BRAND.fullName}`
+  );
+}
 
-  const encoded = encodeURIComponent(message);
-  const url = `https://wa.me/${SELLER_WHATSAPP}?text=${encoded}`;
-  window.open(url, "_blank");
+/** Opens WhatsApp with the order summary pre-filled. */
+export function checkoutViaWhatsApp(
+  ref: string,
+  items: CartItem[],
+  total: number,
+  details: DeliveryDetails
+): void {
+  const message = buildOrderSummary(ref, items, total, details);
+  // wa.me caps out around 2000 characters in practice; trim defensively.
+  const safe = message.length > 1800 ? message.slice(0, 1800) + "…" : message;
+  window.open(
+    `https://wa.me/${SUPPORT.whatsapp}?text=${encodeURIComponent(safe)}`,
+    "_blank",
+    "noopener,noreferrer"
+  );
 }
 
 // ============================================================
-// M-PESA STK PUSH (Safaricom Sandbox/Test)
+// M-Pesa STK Push
 // ============================================================
-// Safaricom Sandbox Test Credentials
-// In production, these would be env variables and calls go through your backend
+/**
+ * NOTE: this runs entirely in the browser and therefore cannot keep a
+ * consumer secret. On a static host the request is expected to fail, and we
+ * fall back to a manual confirmation flow rather than pretending the charge
+ * succeeded. Move this behind a backend (or a payment provider) to go live.
+ */
 const MPESA_CONFIG = {
-  // Sandbox shortcode & passkey (publicly available test credentials)
-  shortcode: "174379",
-  passkey: "bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919",
-  consumerKey: "sDnAFGRfMX3OS3AAPaAe2lcGGblGRRhgmGYcGQmvowbfAdsa",
-  consumerSecret: "GJXhF6fQKUPhhKxAaGOcpHEfpG1hMNiHBCSR0amrLOlsq0BM9PJfOwMbPqIOkyxo",
-  callbackUrl: "https://example.com/api/mpesa/callback",
-  // Sandbox base URL
-  baseUrl: "https://sandbox.safaricom.co.ke",
+  shortcode: process.env.NEXT_PUBLIC_MPESA_SHORTCODE ?? "",
+  passkey: process.env.NEXT_PUBLIC_MPESA_PASSKEY ?? "",
+  consumerKey: process.env.NEXT_PUBLIC_MPESA_CONSUMER_KEY ?? "",
+  consumerSecret: process.env.NEXT_PUBLIC_MPESA_CONSUMER_SECRET ?? "",
+  callbackUrl: process.env.NEXT_PUBLIC_MPESA_CALLBACK_URL ?? "",
+  baseUrl: "https://api.safaricom.co.ke",
 };
 
+export const mpesaConfigured = Boolean(
+  MPESA_CONFIG.consumerKey && MPESA_CONFIG.consumerSecret && MPESA_CONFIG.shortcode
+);
+
 export interface MpesaSTKRequest {
-  phone: string; // Format: 254XXXXXXXXX
+  /** Format: 254XXXXXXXXX */
+  phone: string;
   amount: number;
   accountRef: string;
 }
 
+export interface MpesaResult {
+  success: boolean;
+  message: string;
+  checkoutRequestId?: string;
+  /** True when we could not reach M-Pesa and the user must confirm manually. */
+  manual?: boolean;
+}
+
 export async function initiateMpesaSTKPush(
   request: MpesaSTKRequest
-): Promise<{ success: boolean; message: string; checkoutRequestId?: string }> {
+): Promise<MpesaResult> {
+  if (!mpesaConfigured) {
+    return {
+      success: false,
+      manual: true,
+      message:
+        "Card/M-Pesa is being set up for this store. Complete your order via WhatsApp and we will send the M-Pesa till details instantly.",
+    };
+  }
+
   try {
-    // Step 1: Get OAuth token
-    const authString = btoa(`${MPESA_CONFIG.consumerKey}:${MPESA_CONFIG.consumerSecret}`);
+    const authString = btoa(
+      `${MPESA_CONFIG.consumerKey}:${MPESA_CONFIG.consumerSecret}`
+    );
 
     const tokenRes = await fetch(
       `${MPESA_CONFIG.baseUrl}/oauth/v1/generate?grant_type=client_credentials`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Basic ${authString}`,
-        },
-      }
+      { headers: { Authorization: `Basic ${authString}` } }
     );
+    if (!tokenRes.ok) throw new Error("auth failed");
 
-    if (!tokenRes.ok) {
-      // In static/demo mode, simulate success
-      return simulateMpesaSuccess(request.phone);
-    }
+    const { access_token: accessToken } = await tokenRes.json();
 
-    const tokenData = await tokenRes.json();
-    const accessToken = tokenData.access_token;
-
-    // Step 2: Generate timestamp & password
     const timestamp = new Date()
       .toISOString()
       .replace(/[-T:.Z]/g, "")
       .slice(0, 14);
-    const password = btoa(`${MPESA_CONFIG.shortcode}${MPESA_CONFIG.passkey}${timestamp}`);
+    const password = btoa(
+      `${MPESA_CONFIG.shortcode}${MPESA_CONFIG.passkey}${timestamp}`
+    );
 
-    // Step 3: Initiate STK Push
     const stkRes = await fetch(
       `${MPESA_CONFIG.baseUrl}/mpesa/stkpush/v1/processrequest`,
       {
@@ -116,87 +152,35 @@ export async function initiateMpesaSTKPush(
       }
     );
 
-    if (!stkRes.ok) {
-      return simulateMpesaSuccess(request.phone);
-    }
+    if (!stkRes.ok) throw new Error("stk failed");
 
-    const stkData = await stkRes.json();
-
-    if (stkData.ResponseCode === "0") {
+    const data = await stkRes.json();
+    if (data.ResponseCode === "0") {
       return {
         success: true,
-        message: `STK Push sent to ${request.phone}. Check your phone to enter M-Pesa PIN.`,
-        checkoutRequestId: stkData.CheckoutRequestID,
-      };
-    } else {
-      return {
-        success: false,
-        message: stkData.ResponseDescription || "M-Pesa request failed",
+        checkoutRequestId: data.CheckoutRequestID,
+        message: `Payment request sent to ${request.phone}. Enter your M-Pesa PIN to complete the order.`,
       };
     }
+
+    return {
+      success: false,
+      message: data.ResponseDescription || "M-Pesa request was declined.",
+    };
   } catch {
-    // Fallback: simulate for demo/static deployment
-    return simulateMpesaSuccess(request.phone);
+    return {
+      success: false,
+      manual: true,
+      message:
+        "We could not reach M-Pesa right now. Finish via WhatsApp and we will send payment details immediately.",
+    };
   }
 }
 
-function simulateMpesaSuccess(phone: string) {
-  return {
-    success: true,
-    message: `[TEST MODE] STK Push sent to ${phone}. In production, you'd receive a prompt on your phone to enter your M-Pesa PIN.`,
-    checkoutRequestId: `ws_CO_TEST_${Date.now()}`,
-  };
-}
-
-// ============================================================
-// PAYSTACK (Test Mode)
-// ============================================================
-// Paystack test public key (safe to expose on frontend)
-const PAYSTACK_PUBLIC_KEY = "pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
-
-export interface PaystackConfig {
-  email: string;
-  amount: number; // in kobo/cents (multiply by 100)
-  currency?: string;
-  reference?: string;
-  onSuccess: (reference: string) => void;
-  onClose: () => void;
-}
-
-export function initiatePaystackPayment(config: PaystackConfig) {
-  const reference = config.reference || `RG_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-  // Check if Paystack script is loaded
-  if (typeof window !== "undefined" && (window as any).PaystackPop) {
-    const handler = (window as any).PaystackPop.setup({
-      key: PAYSTACK_PUBLIC_KEY,
-      email: config.email,
-      amount: Math.round(config.amount * 100), // Convert to kobo
-      currency: config.currency || "NGN",
-      ref: reference,
-      callback: (response: any) => {
-        config.onSuccess(response.reference);
-      },
-      onClose: config.onClose,
-    });
-    handler.openIframe();
-  } else {
-    // Fallback: redirect to Paystack checkout (or show demo message)
-    alert(
-      `[TEST MODE] Paystack payment of ${config.currency || "NGN"} ${config.amount.toFixed(2)} would be initiated.\n\nReference: ${reference}\n\nIn production, the Paystack popup will appear for card payment.`
-    );
-    config.onSuccess(reference);
-  }
-}
-
-// Helper to format phone for M-Pesa (ensure 254 prefix)
+/** Normalises a Kenyan number to the 254XXXXXXXXX form M-Pesa expects. */
 export function formatPhoneForMpesa(phone: string): string {
-  let cleaned = phone.replace(/[\s\-\+\(\)]/g, "");
-  if (cleaned.startsWith("0")) {
-    cleaned = "254" + cleaned.slice(1);
-  }
-  if (!cleaned.startsWith("254")) {
-    cleaned = "254" + cleaned;
-  }
-  return cleaned;
+  const cleaned = phone.replace(/[\s\-+()]/g, "");
+  if (cleaned.startsWith("254")) return cleaned;
+  if (cleaned.startsWith("0")) return `254${cleaned.slice(1)}`;
+  return `254${cleaned}`;
 }

@@ -1,253 +1,355 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
-import { ShippingAddress } from "./ShippingForm";
+import { useWallet } from "@/context/WalletContext";
+import type { DeliveryDetails } from "@/lib/orders";
+import { saveOrder } from "@/lib/orders";
 import {
   checkoutViaWhatsApp,
-  initiateMpesaSTKPush,
-  initiatePaystackPayment,
+  generateOrderRef,
   formatPhoneForMpesa,
+  initiateMpesaSTKPush,
 } from "@/lib/checkout";
-import { saveOrder } from "@/lib/orders";
+import { COMMERCE, DELIVERY, SUPPORT } from "@/lib/config";
+import { formatPrice } from "@/lib/format";
+import Icon from "./ui/Icon";
 
 interface CheckoutOptionsProps {
   amount: number;
-  address: ShippingAddress;
+  details: DeliveryDetails;
 }
 
-export default function CheckoutOptions({ amount, address }: CheckoutOptionsProps) {
+type Message = { type: "success" | "error" | "info"; text: string } | null;
+
+export default function CheckoutOptions({ amount, details }: CheckoutOptionsProps) {
   const { items, clearCart } = useCart();
   const { user } = useAuth();
-  const [loading, setLoading] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [showMpesaInput, setShowMpesaInput] = useState(false);
-  const [mpesaPhone, setMpesaPhone] = useState(address.phone || "");
+  const { balance, debit } = useWallet();
 
-  // Save order to user's account in Firestore
-  const handleOrderSave = async (paymentMethod: string, reference: string, status: "pending" | "confirmed") => {
-    if (!user) return;
+  const [loading, setLoading] = useState<string | null>(null);
+  const [message, setMessage] = useState<Message>(null);
+  const [showMpesa, setShowMpesa] = useState(false);
+  const [phone, setPhone] = useState(details.whatsapp);
+  const [completed, setCompleted] = useState<{ ref: string; method: string } | null>(null);
+
+  const canPayFromWallet = balance >= amount;
+
+  /** Persists the order; never blocks the customer flow if it fails. */
+  const persist = async (
+    method: string,
+    reference: string,
+    status: "pending" | "paid"
+  ) => {
     try {
       await saveOrder({
-        userId: user.uid,
-        userEmail: user.email || "",
-        userName: user.displayName || "",
+        orderRef: reference,
+        userId: user?.uid ?? "guest",
+        userEmail: user?.email ?? details.email,
+        userName: user?.displayName ?? details.fullName,
         items,
         totalAmount: amount,
-        shippingAddress: address,
-        paymentMethod,
+        currency: COMMERCE.currency,
+        delivery: details,
+        paymentMethod: method,
         paymentReference: reference,
         status,
       });
     } catch (err) {
-      console.error("Failed to save order:", err);
+      console.error("Could not save order:", err);
     }
   };
 
-  // WhatsApp Checkout
-  const handleWhatsApp = async () => {
-    setLoading("whatsapp");
+  const finish = (ref: string, method: string) => {
+    setCompleted({ ref, method });
+    clearCart();
+  };
+
+  /* ----------------------------- Wallet ----------------------------- */
+  const handleWallet = async () => {
+    setLoading("wallet");
     setMessage(null);
-    try {
-      checkoutViaWhatsApp(items, amount, address);
-      const ref = `WA_${Date.now()}`;
-      await handleOrderSave("WhatsApp", ref, "pending");
-      setMessage({ type: "success", text: "Order sent to WhatsApp! Complete the chat to confirm." });
-      clearCart();
-    } catch {
-      setMessage({ type: "error", text: "Failed to open WhatsApp. Try again." });
-    }
-    setLoading(null);
-  };
+    const ref = generateOrderRef();
 
-  // M-Pesa STK Push
-  const handleMpesa = async () => {
-    if (!mpesaPhone.trim()) {
-      setMessage({ type: "error", text: "Please enter your M-Pesa phone number." });
+    if (!debit(amount)) {
+      setMessage({
+        type: "error",
+        text: "Insufficient wallet balance. Top up and try again.",
+      });
+      setLoading(null);
       return;
     }
 
+    await persist("Wallet", ref, "paid");
+    finish(ref, "Wallet balance");
+    setLoading(null);
+  };
+
+  /* ----------------------------- M-Pesa ----------------------------- */
+  const handleMpesa = async () => {
+    if (!phone.trim()) {
+      setMessage({ type: "error", text: "Enter the M-Pesa number to charge." });
+      return;
+    }
     setLoading("mpesa");
     setMessage(null);
-    const phone = formatPhoneForMpesa(mpesaPhone);
-    const accountRef = `RiotGear-${Date.now().toString().slice(-6)}`;
 
+    const ref = generateOrderRef();
     const result = await initiateMpesaSTKPush({
-      phone,
+      phone: formatPhoneForMpesa(phone),
       amount,
-      accountRef,
+      accountRef: ref,
     });
 
-    setMessage({
-      type: result.success ? "success" : "error",
-      text: result.message,
-    });
-
-    if (result.success && result.checkoutRequestId) {
-      await handleOrderSave("M-Pesa", result.checkoutRequestId, "pending");
-      clearCart();
-      setShowMpesaInput(false);
+    if (result.success) {
+      await persist("M-Pesa", result.checkoutRequestId ?? ref, "pending");
+      finish(ref, "M-Pesa");
+    } else {
+      setMessage({
+        type: result.manual ? "info" : "error",
+        text: result.message,
+      });
     }
     setLoading(null);
   };
 
-  // Paystack
-  const handlePaystack = () => {
-    setLoading("paystack");
+  /* ---------------------------- WhatsApp ---------------------------- */
+  const handleWhatsApp = async () => {
+    setLoading("whatsapp");
     setMessage(null);
-    initiatePaystackPayment({
-      email: address.email,
-      amount: amount,
-      currency: "NGN",
-      onSuccess: async (reference) => {
-        setMessage({
-          type: "success",
-          text: `Payment successful! Ref: ${reference}`,
-        });
-        await handleOrderSave("Paystack", reference, "confirmed");
-        clearCart();
-        setLoading(null);
-      },
-      onClose: () => {
-        setMessage({ type: "error", text: "Payment window closed." });
-        setLoading(null);
-      },
-    });
+    const ref = generateOrderRef();
+    try {
+      checkoutViaWhatsApp(ref, items, amount, details);
+      await persist("WhatsApp", ref, "pending");
+      finish(ref, "WhatsApp");
+    } catch {
+      setMessage({ type: "error", text: "Could not open WhatsApp. Try again." });
+    }
+    setLoading(null);
   };
 
+  /* ----------------------------- Success ---------------------------- */
+  if (completed) {
+    return (
+      <div className="text-center py-6 animate-fade-up">
+        <div className="w-16 h-16 rounded-full bg-[var(--color-success)]/10 flex items-center justify-center mx-auto mb-4">
+          <Icon name="check" className="w-8 h-8 text-[var(--color-success)]" />
+        </div>
+        <h3 className="text-lg font-extrabold">Order Received!</h3>
+        <p className="text-xs text-[var(--color-ink-soft)] mt-1">
+          Paid with {completed.method}
+        </p>
+
+        <div className="mt-4 rounded-2xl border border-[var(--color-line)] bg-[var(--color-page)] p-4 text-left">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-soft)]">
+              Order reference
+            </span>
+            <span className="font-mono text-xs font-bold">{completed.ref}</span>
+          </div>
+          <div className="mt-3 text-[11px] text-[var(--color-ink-soft)] leading-relaxed">
+            We are preparing your accounts now. They will be sent to{" "}
+            <span className="font-bold text-[var(--color-ink)]">
+              {details.email}
+            </span>{" "}
+            and your WhatsApp within minutes. Keep your reference for support.
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <a
+            href={`https://wa.me/${SUPPORT.whatsapp}?text=${encodeURIComponent(
+              `Hi, I just placed order ${completed.ref}. Please confirm delivery.`
+            )}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-2 w-full py-3 rounded-xl bg-[#25D366] hover:bg-[#1da851] text-white text-sm font-bold transition-colors"
+          >
+            <Icon name="whatsapp" className="w-4 h-4" />
+            Confirm on WhatsApp
+          </a>
+          {user && (
+            <Link
+              href="/account/orders/"
+              className="flex items-center justify-center gap-2 w-full py-3 rounded-xl border border-[var(--color-line)] text-sm font-bold hover:border-[var(--color-brand)] transition-colors"
+            >
+              <Icon name="download" className="w-4 h-4" />
+              View My Orders
+            </Link>
+          )}
+        </div>
+
+        <p className="text-[10px] text-[var(--color-ink-faint)] mt-4">
+          {DELIVERY.guarantee}
+        </p>
+      </div>
+    );
+  }
+
+  /* ----------------------------- Methods ---------------------------- */
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between mb-1">
-        <h3 className="font-bold text-sm uppercase tracking-wider">Choose Payment</h3>
-        <span className="font-bold text-lg">${amount.toFixed(2)}</span>
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-bold uppercase tracking-wider">
+          Choose Payment
+        </h3>
+        <span className="text-lg font-extrabold text-[var(--color-brand)] tabular-nums">
+          {formatPrice(amount)}
+        </span>
       </div>
 
-      {/* Status Message */}
       {message && (
         <div
-          className={`p-3 text-xs font-medium rounded ${
+          className={`p-3 rounded-xl text-[11px] leading-relaxed border ${
             message.type === "success"
-              ? "bg-green-50 text-green-700 border border-green-200"
-              : "bg-red-50 text-red-700 border border-red-200"
+              ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-500/10 dark:border-green-500/25 dark:text-green-300"
+              : message.type === "info"
+                ? "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/25 dark:text-blue-300"
+                : "bg-red-50 text-red-700 border-red-200 dark:bg-red-500/10 dark:border-red-500/25 dark:text-red-300"
           }`}
         >
           {message.text}
         </div>
       )}
 
-      {/* WhatsApp Checkout */}
+      {/* Wallet */}
       <button
-        onClick={handleWhatsApp}
+        type="button"
+        onClick={handleWallet}
         disabled={loading !== null}
-        className="bg-[#25D366] text-white p-3 font-bold flex justify-between items-center hover:bg-[#1da851] transition-colors disabled:opacity-50 text-sm"
+        className={`w-full p-3.5 rounded-xl flex items-center justify-between text-sm font-bold transition-colors disabled:opacity-50 ${
+          canPayFromWallet
+            ? "bg-[var(--color-brand)] hover:bg-[var(--color-brand-strong)] text-white"
+            : "bg-[var(--color-line)] text-[var(--color-ink-soft)]"
+        }`}
       >
         <span className="flex items-center gap-2">
-          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-          </svg>
-          ORDER VIA WHATSAPP
+          {loading === "wallet" ? (
+            <Spinner />
+          ) : (
+            <Icon name="wallet" className="w-5 h-5" />
+          )}
+          Pay with Wallet
         </span>
-        <span className="text-[10px] opacity-75">Direct to Seller</span>
+        <span className="text-[11px] font-medium opacity-80">
+          {canPayFromWallet
+            ? formatPrice(balance)
+            : `Balance ${formatPrice(balance)}`}
+        </span>
       </button>
 
-      {/* M-Pesa Section */}
-      {!showMpesaInput ? (
+      {/* M-Pesa */}
+      {!showMpesa ? (
         <button
-          onClick={() => setShowMpesaInput(true)}
+          type="button"
+          onClick={() => setShowMpesa(true)}
           disabled={loading !== null}
-          className="bg-[#49B642] text-white p-3 font-bold flex justify-between items-center hover:bg-[#3da636] transition-colors disabled:opacity-50 text-sm"
+          className="w-full p-3.5 rounded-xl bg-[#49B642] hover:bg-[#3da636] text-white text-sm font-bold flex items-center justify-between transition-colors disabled:opacity-50"
         >
           <span className="flex items-center gap-2">
-            <span className="font-black text-lg">M</span>
-            PAY VIA M-PESA
+            <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[11px] font-black">
+              M
+            </span>
+            Pay via M-Pesa
           </span>
-          <span className="text-[10px] opacity-75">Kenya/Tanzania</span>
+          <span className="text-[11px] font-medium opacity-80">Instant</span>
         </button>
       ) : (
-        <div className="border-2 border-[#49B642] rounded-sm p-4 bg-[#49B642]/5">
+        <div className="rounded-xl border-2 border-[#49B642] p-4 bg-[#49B642]/5">
           <div className="flex items-center gap-2 mb-3">
-            <span className="bg-[#49B642] text-white font-black text-sm w-7 h-7 flex items-center justify-center rounded-full">M</span>
+            <span className="w-8 h-8 rounded-full bg-[#49B642] text-white flex items-center justify-center font-black text-sm">
+              M
+            </span>
             <div>
-              <p className="text-xs font-bold text-[#49B642] uppercase">M-Pesa Payment</p>
-              <p className="text-[10px] text-gray-500">Amount: <span className="font-bold text-[var(--color-charcoal)]">${amount.toFixed(2)}</span></p>
+              <p className="text-xs font-bold text-[#3da636] uppercase">
+                M-Pesa Payment
+              </p>
+              <p className="text-[10px] text-[var(--color-ink-soft)]">
+                Charge {formatPrice(amount)}
+              </p>
             </div>
           </div>
-
-          {/* Phone Input */}
-          <div className="mb-3">
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-1.5">
-              M-Pesa Phone Number
-            </label>
-            <input
-              type="tel"
-              value={mpesaPhone}
-              onChange={(e) => setMpesaPhone(e.target.value)}
-              placeholder="e.g. 0712345678 or +254712345678"
-              className="w-full border border-gray-200 px-3 py-2.5 text-sm focus:outline-none focus:border-[#49B642] transition-colors"
-            />
-            <p className="text-[10px] text-gray-400 mt-1">
-              An STK push of <span className="font-bold">${amount.toFixed(2)}</span> will be sent to this number
-            </p>
-          </div>
-
-          {/* Actions */}
-          <div className="flex gap-2">
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="e.g. 0712345678"
+            className="w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-panel)] text-sm outline-none focus:border-[#49B642]"
+          />
+          <div className="flex gap-2 mt-3">
             <button
-              onClick={() => setShowMpesaInput(false)}
-              className="flex-1 border border-gray-300 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-600 hover:bg-gray-50 transition-colors"
+              type="button"
+              onClick={() => setShowMpesa(false)}
+              className="flex-1 py-2.5 rounded-xl border border-[var(--color-line)] text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)] hover:bg-[var(--color-line)] transition-colors"
             >
               Cancel
             </button>
             <button
+              type="button"
               onClick={handleMpesa}
-              disabled={loading === "mpesa" || !mpesaPhone.trim()}
-              className="flex-1 bg-[#49B642] text-white py-2.5 text-xs font-bold uppercase tracking-wider hover:bg-[#3da636] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+              disabled={loading === "mpesa" || !phone.trim()}
+              className="flex-1 py-2.5 rounded-xl bg-[#49B642] hover:bg-[#3da636] text-white text-xs font-bold uppercase tracking-wider disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
             >
-              {loading === "mpesa" ? (
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              ) : null}
-              {loading === "mpesa" ? "Sending..." : "Pay Now"}
+              {loading === "mpesa" && <Spinner />}
+              {loading === "mpesa" ? "Sending…" : "Pay Now"}
             </button>
           </div>
         </div>
       )}
 
-      {/* Paystack */}
+      {/* WhatsApp */}
       <button
-        onClick={handlePaystack}
+        type="button"
+        onClick={handleWhatsApp}
         disabled={loading !== null}
-        className="bg-[#09A5DB] text-white p-3 font-bold flex justify-between items-center hover:bg-[#0890bf] transition-colors disabled:opacity-50 text-sm"
+        className="w-full p-3.5 rounded-xl bg-[#25D366] hover:bg-[#1da851] text-white text-sm font-bold flex items-center justify-between transition-colors disabled:opacity-50"
       >
         <span className="flex items-center gap-2">
-          {loading === "paystack" ? (
-            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
+          {loading === "whatsapp" ? (
+            <Spinner />
           ) : (
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <rect x="2" y="5" width="20" height="14" rx="2" fill="none" stroke="currentColor" strokeWidth="2"/>
-              <path d="M2 10h20" stroke="currentColor" strokeWidth="2"/>
-            </svg>
+            <Icon name="whatsapp" className="w-5 h-5" />
           )}
-          PAY WITH PAYSTACK
+          Order via WhatsApp
         </span>
-        <span className="text-[10px] opacity-75">Nigeria/SA/Ghana</span>
+        <span className="text-[11px] font-medium opacity-80">Fastest</span>
       </button>
 
-      <p className="text-[10px] text-gray-500 text-center mt-1">
-        Shipping to: {address.city}, {address.country} — {address.fullName}
+      <p className="text-[10px] text-[var(--color-ink-soft)] text-center leading-relaxed pt-1">
+        Delivering to{" "}
+        <span className="font-bold text-[var(--color-ink)]">{details.email}</span>
+        {" · "}
+        {details.country}
       </p>
 
       {!user && (
-        <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 p-2 rounded text-center mt-1">
-          Sign in to save order history to your account
+        <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/25 dark:text-amber-300 p-2.5 rounded-xl text-center">
+          Sign in before ordering to keep your accounts in your dashboard
+          forever.
         </p>
       )}
     </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="4"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
+    </svg>
   );
 }
