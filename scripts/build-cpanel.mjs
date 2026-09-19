@@ -88,16 +88,35 @@ async function main() {
     throw new Error("server/api is missing — cannot produce a working payment bundle.");
   }
   await cp(serverApiDir, path.join(distDir, "api"), { recursive: true });
-  log("copied PHP payment API → dist/api/");
 
-  // The order ledger must be writable by PHP at runtime.
+  // The PHP test suite, its stubs and the concurrency harness are development
+  // tools. They have no business on a production web root: they hold fixtures
+  // that look like credentials, and every file under the document root is
+  // reachable unless something explicitly blocks it. Removed here rather than
+  // relying on .htaccess alone.
+  for (const unwanted of ["tests", "data"]) {
+    const target = path.join(distDir, "api", unwanted);
+    if (existsSync(target)) {
+      await rm(target, { recursive: true, force: true });
+    }
+  }
+  // The order ledger and the stock queue must be writable by PHP at runtime, and
+  // an EMPTY directory does not survive zipping — the stock directory would go
+  // missing on the server and the first upload would fail for a reason that
+  // looks like a permissions problem. A placeholder file keeps both in the
+  // archive.
   const dataDir = path.join(distDir, "api", "data");
-  await mkdir(dataDir, { recursive: true });
+  await mkdir(path.join(dataDir, "inventory"), { recursive: true });
   await writeFile(
     path.join(dataDir, ".gitkeep"),
     "# Order ledger. Must stay writable by PHP (chmod 755 or 775).\n"
   );
-  log("created dist/api/data/ (set permissions after upload)");
+  await writeFile(
+    path.join(dataDir, "inventory", ".gitkeep"),
+    "# Stock queue. Must stay writable by PHP (chmod 755 or 775).\n"
+  );
+  log("copied PHP payment API → dist/api/");
+  log("created dist/api/data/ + inventory (set permissions after upload)");
 
   // Never ship a config with real keys in the bundle; only the sample.
   const configPath = path.join(distDir, "api", "config.php");

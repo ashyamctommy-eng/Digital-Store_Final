@@ -14,11 +14,12 @@
     "test:php:unit": "php server/api/tests/unit.php",
     "test:php:concurrency": "php server/api/tests/concurrency.php",
     "test:php:http": "bash server/api/tests/http.sh",
-    "verify": "npm run typecheck && npm run lint && npm run test:php && npm run build:cpanel",
+    "verify": "npm run typecheck && npm run lint && npm run test:php && npm run build:cpanel && npm run verify:bundle",
     "sync:catalog": "node scripts/sync-catalog.mjs",
     "test:php:requires": "php server/api/tests/requires.php",
     "deploy:branch": "node scripts/deploy-branch.mjs",
-    "deploy:branch:build": "npm run build:cpanel && node scripts/deploy-branch.mjs"
+    "deploy:branch:build": "npm run build:cpanel && node scripts/deploy-branch.mjs",
+    "verify:bundle": "node scripts/verify-bundle.mjs"
   },
   "dependencies": {
     "firebase": "^12.13.0",

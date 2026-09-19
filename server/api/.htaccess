@@ -16,8 +16,12 @@ Options -Indexes
   RewriteRule ^data/ - [F,L]
   RewriteRule ^config\.php$ - [F,L]
   RewriteRule ^config\.sample\.php$ - [F,L]
+  RewriteRule ^tests/ - [F,L]
   RewriteRule \.log$ - [F,L]
   RewriteRule \.json$ - [F,L]
+  # Notes and readmes are for whoever has file access, not for the internet.
+  # (They hold no secrets, but they describe the API surface.)
+  RewriteRule \.(md|txt|sh)$ - [F,L]
 
   # --- Pretty URLs: /api/palplus/initiate -> /api/palplus/initiate.php ---
   RewriteCond %{REQUEST_FILENAME} !-f
