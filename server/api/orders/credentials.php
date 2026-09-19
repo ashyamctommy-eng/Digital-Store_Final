@@ -75,9 +75,6 @@ json_ok([
             // Proxy-only fields.
             'proxies' => is_array($unit['proxies'] ?? null) ? array_values($unit['proxies']) : [],
             'proxy_count' => isset($unit['proxy_count']) ? (int) $unit['proxy_count'] : null,
-            'proxy_country' => $unit['country'] ?? null,
-            'proxy_protocol' => $unit['protocol'] ?? null,
-            'pool_tier' => $unit['pool_tier'] ?? null,
         ],
         $deliverables
     ),

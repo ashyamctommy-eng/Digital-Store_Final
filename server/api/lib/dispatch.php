@@ -11,7 +11,6 @@ declare(strict_types=1);
 require_once __DIR__ . '/inventory.php';
 require_once __DIR__ . '/catalog.php';
 require_once __DIR__ . '/smsotp.php';
-require_once __DIR__ . '/nextproxy.php';
 require_once __DIR__ . '/proxyaddr.php';
 
 /** Normalises the cart lines sent by the storefront. */
@@ -162,39 +161,57 @@ function dispatch_claim_proxy(array $config, string $productId, int $qty, string
 
     $perUnit = max(1, (int) ($spec['per_unit'] ?? 1));
 
-    // 1. Pre-bought stock. Count first so only whole units are claimed — a
+    // 1. Claim from the queue. Count first so only whole units are taken — a
     //    claim of 7 leftover addresses would be sold as a 10-IP product.
     $available = inventory_count_available($config, $productId);
     $staticUnits = min($qty, intdiv($available, $perUnit));
 
-    $staticAddresses = [];
+    $claimed = [];
     if ($staticUnits > 0) {
         $claim = inventory_claim($config, $productId, $staticUnits * $perUnit, $orderId);
         foreach ($claim['units'] as $unit) {
             $address = (string) ($unit['proxy'] ?? $unit['uid'] ?? '');
-            if ($address !== '') {
-                $staticAddresses[] = $address;
+            if ($address === '') {
+                continue;
             }
+            // Credentials travel with the address: a proxy that needs auth is
+            // useless to the buyer without them, and the checker needs them too.
+            $claimed[] = [
+                'address' => $address,
+                'username' => (string) ($unit['username'] ?? ''),
+                'password' => (string) ($unit['password'] ?? ''),
+            ];
         }
     }
 
     $units = [];
-    foreach (array_chunk($staticAddresses, $perUnit) as $chunk) {
+    foreach (array_chunk($claimed, $perUnit) as $chunk) {
         if (count($chunk) < $perUnit || count($units) >= $qty) {
-            // A racing order shrank the pool between counting and claiming;
+            // A racing order shrank the queue between counting and claiming;
             // stop rather than deliver a partial unit.
             break;
         }
+
+        $addresses = [];
+        $auth = [];
+        foreach ($chunk as $entry) {
+            $addresses[] = $entry['address'];
+            if ($entry['username'] !== '' || $entry['password'] !== '') {
+                $auth[$entry['address']] = $entry['username'] . ':' . $entry['password'];
+            }
+        }
+
         $units[] = [
             'kind' => 'proxy',
             'source' => 'static',
             'product_id' => $productId,
-            'uid' => $chunk[0],
-            'secret' => implode(PHP_EOL, $chunk),
-            'proxies' => array_values($chunk),
-            'proxy_count' => count($chunk),
-            'country' => strtoupper((string) ($spec['country'] ?? '')),
-            'protocol' => (string) ($spec['protocol'] ?? ''),
+            'uid' => $addresses[0],
+            'secret' => implode(PHP_EOL, $addresses),
+            'proxies' => $addresses,
+            // Only addresses that actually have credentials appear here, so an
+            // empty map means "no auth needed" rather than "auth unknown".
+            'proxy_auth' => $auth,
+            'proxy_count' => count($addresses),
             'notes' => '',
         ];
     }
@@ -204,62 +221,14 @@ function dispatch_claim_proxy(array $config, string $productId, int $qty, string
         return ['units' => $units, 'shortfall' => 0, 'dynamic_error' => null];
     }
 
-    // 2. On-demand supply.
-    if (!nextproxy_is_configured($config)) {
-        return [
-            'units' => $units,
-            'shortfall' => $remaining,
-            'dynamic_error' => 'The proxy provider is not enabled.',
-        ];
-    }
-
-    $fetch = nextproxy_fetch(
-        $config,
-        $remaining * $perUnit,
-        (string) ($spec['country'] ?? ''),
-        (string) ($spec['protocol'] ?? '')
-    );
-
-    if (!$fetch['ok']) {
-        return ['units' => $units, 'shortfall' => $remaining, 'dynamic_error' => $fetch['error']];
-    }
-
-    $meta = $fetch['meta'] ?? [];
-    $dynamicError = null;
-    $partial = 0;
-
-    foreach (array_chunk($fetch['proxies'], $perUnit) as $chunk) {
-        if (count($units) >= $qty) {
-            break;
-        }
-        if (count($chunk) < $perUnit) {
-            $partial = count($chunk);
-            break;
-        }
-        $units[] = [
-            'kind' => 'proxy',
-            'source' => 'dynamic',
-            'product_id' => $productId,
-            'uid' => $chunk[0],
-            'secret' => implode(PHP_EOL, $chunk),
-            'proxies' => array_values($chunk),
-            'proxy_count' => count($chunk),
-            'country' => strtoupper((string) ($spec['country'] ?? '')),
-            'protocol' => (string) ($spec['protocol'] ?? ''),
-            // Recorded for support: a shared-pool batch can be replaced later.
-            'pool_tier' => $meta['tier'] ?? null,
-            'notes' => '',
-        ];
-    }
-
-    $shortfall = max(0, $qty - count($units));
-    if ($shortfall > 0) {
-        $dynamicError = $fetch['error'] ?? ($partial > 0
-            ? 'The provider pool returned an incomplete batch.'
-            : 'The provider pool was smaller than requested.');
-    }
-
-    return ['units' => $units, 'shortfall' => $shortfall, 'dynamic_error' => $dynamicError];
+    // 2. No on-demand source: proxy addresses are stocked by hand, so anything
+    //    the queue cannot cover is a shortfall the admin has to fill. Selling
+    //    from a third-party pool was removed deliberately — see AGENTS.md.
+    return [
+        'units' => $units,
+        'shortfall' => $remaining,
+        'dynamic_error' => 'Not enough addresses in stock. Add more in Stock & Credentials.',
+    ];
 }
 
 /**
@@ -408,9 +377,12 @@ function dispatch_render_text(array $order, array $deliverables, bool $includeTo
 
             if (($unit['kind'] ?? '') === 'proxy') {
                 $proxies = is_array($unit['proxies'] ?? null) ? $unit['proxies'] : [];
+                $auth = is_array($unit['proxy_auth'] ?? null) ? $unit['proxy_auth'] : [];
                 $lines[] = 'Proxies (' . count($proxies) . '):';
                 foreach ($proxies as $proxy) {
-                    $lines[] = '  ' . $proxy;
+                    // Print credentials inline when present; a proxy that needs
+                    // auth is unusable without them.
+                    $lines[] = '  ' . $proxy . (isset($auth[$proxy]) ? '  (' . $auth[$proxy] . ')' : '');
                 }
                 if (!empty($unit['country'])) {
                     $lines[] = 'Country: ' . $unit['country'];

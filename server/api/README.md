@@ -18,8 +18,7 @@ into client JavaScript.
 | GET | `/api/orders/credentials?order_id&token` | Credentials for a paid order |
 | GET | `/api/orders/sms-status?order_id&token` | Live inbox feed for SMS numbers |
 | GET | `/api/admin/smsotp-status` | Provider balance + service list (admin key) |
-| GET | `/api/admin/nextproxy-status` | Proxy pool status + quota (admin key). `?refresh=1` costs 1 credit |
-| POST | `/api/admin/nextproxy-key` | Save/clear the proxy API key (admin key) |
+| POST | `/api/admin/proxies/check` | Test/rank pasted addresses (admin key) |
 | POST | `/api/admin/inventory/add` | Bulk credential upload (admin key) |
 | GET | `/api/admin/inventory/list` | Per-product stock totals (admin key) |
 | POST | `/api/admin/inventory/delete` | Remove one unit (admin key) |
@@ -107,42 +106,25 @@ provider spec is. Fulfilment for those follows a fixed priority in
 `smsotp.balance_cache_seconds` (default 120) because the storefront asks for
 counts on every page load; the authoritative check runs again at dispatch time.
 
-## On-demand proxy supply
+## Proxy stock
 
-`catalog.php` also marks which products are IP:PORT batches and how many
-addresses a unit is worth. `dispatch_claim_proxy()` then follows the same chain
-as SMS:
+`catalog.php` marks which products are IP:PORT batches and how many addresses a
+unit is worth. `dispatch_claim_proxy()` claims whole units from the queue in
+`inventory_stock`; there is no provider, so an empty queue is a shortfall and the
+storefront shows Out of Stock.
 
-1. **Pre-bought stock** — `IP:PORT` lines uploaded by the admin. Only whole units
-   are claimed, so 7 leftover addresses are never sold as a 10-IP product;
-2. **On-demand pool** — only when static stock cannot make a whole unit;
-3. **Shortfall** — recorded for the admin, and the storefront shows Out of Stock.
+Accepted upload formats: `HOST:PORT`, `USER:PASS@HOST:PORT`,
+`HOST:PORT:USER:PASS` and `HOST:PORT | USER:PASS`. `lib/proxyaddr.php` refuses
+private, loopback, link-local, carrier-NAT and documentation ranges at ingest.
 
-`GET /api/admin/nextproxy-status` reports reachability, the account tier, the
-pool size and sample addresses, plus the quota counters. Those counters are real
-but conditional:
+## Proxy checker
 
-- `x-credits-remaining` / `x-credits-used` are sent **only to authenticated
-  callers**; anonymous requests get just `x-ratelimit-*`. An unauthenticated
-  probe therefore looks like "credits do not exist", which is how an earlier
-  version of this file got it wrong.
-- Cost is **per request, not per address** — 1 credit whether `limit` is 1 or
-  100 — and `/api/health` is free.
-- There is no credits **route**: `/api/profile` and `/api/credits` 404 even
-  authenticated, so the balance is read from response headers.
-
-The storefront's availability check deliberately uses the free health endpoint
-rather than the sampled probe, because that probe costs a credit and a credit per
-page view would drain a 1,000-credit key in roughly three days.
-
-`POST /api/admin/nextproxy-key` stores the key in `data/settings.json` (mode
-0600, allow-listed to that one setting) so the owner can paste it in the console
-instead of editing `config.php`. The effective key resolves as: stored setting →
-`config.php` → `NEXTPROXY_API_KEY`. The key is only ever returned masked.
-
-A key is **optional** for this provider — its pool is served to unauthenticated
-callers. A key is still validated when supplied, and a wrong one fails every
-request, which is worth knowing before blaming the provider for an outage.
+`POST /api/orders/proxies-check` (buyer, token-gated) and
+`POST /api/admin/proxies/check` (admin key) grade addresses by connecting
+through them to `/api/proxies/echo` on this same host, which reports the exit IP
+and forwarding headers. Results are ranked by a 0-100 heuristic covering health,
+speed, anonymity and detected protocol. Uses `curl_multi`, a bounded concurrency
+and a hard per-request cap so one call cannot tie up the server.
 
 ## Credential access
 
@@ -162,17 +144,16 @@ surfaced: the credentials are already on screen and in the ledger.
 ```bash
 npm run test:php              # everything
 npm run test:php:requires     # every call resolves through its require chain
-npm run test:php:unit         # 232 assertions: parsing, claiming, dispatch, HMAC
+npm run test:php:unit         # parsing, claiming, dispatch, HMAC, proxy formats
 npm run test:php:concurrency  # 10 processes racing for 40 units
-npm run test:php:http         # 133 end-to-end HTTP assertions
+npm run test:php:http         # end-to-end HTTP assertions
 ```
 
-`test:php:http` also starts `tests/smsotp-stub.php` and
-`tests/nextproxy-stub.php`, stubs of both providers. The SMS stub records how
-many times it was charged, and the proxy stub records the key it was sent and
-how many addresses it served — so "static stock is preferred", "no number is
-bought on an empty balance" and "a partial unit is never sold" are asserted
-rather than assumed.
+`test:php:http` also starts `tests/smsotp-stub.php`, a stub of the SMS provider
+that records how many times it was charged — so "static stock is preferred" and
+"no number is bought on an empty balance" are asserted, not assumed. Proxy
+checking is exercised against a real forwarding proxy started on localhost, so
+the health, anonymity and protocol detection paths are tested for real.
 
 `test:php:http` starts PHP's built-in server with `tests/router.php`, which
 emulates the `.htaccess` rewrites. It temporarily writes `config.php` pointing

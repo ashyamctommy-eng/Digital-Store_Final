@@ -49,20 +49,14 @@ const CATALOG_SMS_PRODUCTS = [
 /** product_id => pool spec, for delivery_kind "proxy" products. */
 const CATALOG_PROXY_PRODUCTS = [
     'proxy-9p-10' => [
-        'country' => 'US',
-        'protocol' => 'https',
         'per_unit' => 10,
         'label' => 'Static IPs',
     ],
     'proxy-mobile-02' => [
-        'country' => 'US',
-        'protocol' => 'socks5',
         'per_unit' => 5,
         'label' => 'Mobile IPs',
     ],
     'proxy-dc-03' => [
-        'country' => '',
-        'protocol' => 'https',
         'per_unit' => 25,
         'label' => 'Datacenter IPs',
     ],

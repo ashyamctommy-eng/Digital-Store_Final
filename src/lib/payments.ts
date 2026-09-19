@@ -329,12 +329,8 @@ export interface DeliveredCredential {
    */
   proxies?: string[];
   proxy_count?: number | null;
-  /** Proxy only: the country the pool was filtered to. */
-  proxy_country?: string | null;
-  /** Proxy only: the protocol the addresses speak (https, socks5…). */
-  proxy_protocol?: string | null;
-  /** Proxy only: the provider tier that served the batch. */
-  pool_tier?: string | null;
+  /** Proxy only: address => "user:pass", for addresses that need auth. */
+  proxy_auth?: Record<string, string>;
 }
 
 export interface SmsNumber {
@@ -400,14 +396,98 @@ export async function fetchSmsStatus(
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Proxy checking                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One graded proxy address.
+ *
+ * Everything except `address`/`username`/`password` is measured by our own
+ * server, not claimed by a seller: `protocol` is the one that actually carried a
+ * request, and `anonymity` comes from the forwarding headers the reflector saw.
+ */
+export interface ProxyCheckResult {
+  address: string;
+  username: string;
+  password: string;
+  healthy: boolean;
+  /** The protocol that worked: "http", "socks5" or "socks4". */
+  protocol: string | null;
+  /** The address the target site would see. */
+  exit_ip: string | null;
+  latency_ms: number | null;
+  speed: "excellent" | "good" | "fair" | "slow" | "unreachable";
+  anonymity: "elite" | "anonymous" | "transparent" | "unknown";
+  /** 0-100 quality heuristic measured by this store — not a reputation score. */
+  score: number;
+  grade: "excellent" | "good" | "fair" | "poor";
+  error: string | null;
+}
+
+export interface ProxyCheckSummary {
+  checked: number;
+  healthy: number;
+  dead: number;
+  elite: number;
+  median_latency_ms: number | null;
+  best_score: number;
+}
+
+export interface ProxyCheckResponse {
+  order_id?: string;
+  product_id?: string | null;
+  results: ProxyCheckResult[];
+  summary: ProxyCheckSummary;
+  egress_ip: string | null;
+  elapsed_ms?: number;
+  truncated?: boolean;
+  max_checked?: number;
+  error: string | null;
+  note?: string;
+}
+
+/**
+ * Tests the proxies attached to a paid order.
+ *
+ * Only the addresses recorded against that order are tested — the order token
+ * authorises one order's own credentials, so this cannot be used to probe
+ * arbitrary addresses.
+ */
+export async function verifyOrderProxies(
+  orderId: string,
+  token: string
+): Promise<ApiResult<ProxyCheckResponse>> {
+  return postJson<ProxyCheckResponse>(`/orders/proxies-check`, {
+    order_id: orderId,
+    token,
+  });
+}
+
+/**
+ * The line to hand a proxy tool for one address.
+ *
+ * Credentials are included when present: a proxy that needs auth is unusable
+ * without them, and `user:pass@host:port` is the spelling most tools accept.
+ */
+export function proxyLine(entry: {
+  address: string;
+  username?: string | null;
+  password?: string | null;
+}): string {
+  const user = entry.username ?? "";
+  const pass = entry.password ?? "";
+  if (user === "" && pass === "") {
+    return entry.address;
+  }
+  return `${user}:${pass}@${entry.address}`;
+}
+
 /** Public stock counts (COUNT of available inventory units). */
 export async function fetchStockCounts(): Promise<
   ApiResult<{
     counts: Record<string, number>;
-    /**
-     * Products with no usable static stock that the provider can still supply,
-     * either SMS or proxy.
-     */
+    /** SMS products with no static stock that can still be bought on demand. */
     dynamic: string[];
     generated_at: string;
   }>

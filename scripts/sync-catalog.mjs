@@ -60,20 +60,16 @@ function parseProxy(block, id) {
   const string = (name) => proxyBlock.match(new RegExp(`${name}:\\s*"([^"]*)"`))?.[1];
   const number = (name) => proxyBlock.match(new RegExp(`${name}:\\s*(\\d+)`))?.[1];
 
-  const country = string("country") ?? "";
-  const protocol = string("protocol") ?? "";
   const perUnit = Number.parseInt(number("per_unit") ?? "", 10);
 
   if (!Number.isFinite(perUnit) || perUnit < 1) {
     throw new Error(`Product "${id}" is missing a positive proxy.per_unit.`);
   }
 
-  return {
-    country,
-    protocol,
-    per_unit: perUnit,
-    label: string("label") ?? "Proxy IPs",
-  };
+  // Only the unit size matters now: addresses are stocked by hand, so there is
+  // no provider to filter by country or protocol. The checker reports the real
+  // protocol, which is better than a static claim anyway.
+  return { per_unit: perUnit, label: string("label") ?? "Proxy IPs" };
 }
 
 function parseCatalog(source) {
@@ -111,8 +107,6 @@ function proxyEntries(rows) {
   return rows
     .map(
       (r) => `    '${esc(r.id)}' => [
-        'country' => '${esc(r.country)}',
-        'protocol' => '${esc(r.protocol)}',
         'per_unit' => ${r.per_unit},
         'label' => '${esc(r.label)}',
     ],`
@@ -203,7 +197,5 @@ for (const r of sms) {
   console.log(`    sms    ${r.id.padEnd(16)} ${r.label} (service ${r.service_id}, country ${r.country_id})`);
 }
 for (const r of proxies) {
-  console.log(
-    `    proxy  ${r.id.padEnd(16)} ${r.label} (${r.country || "ANY"} / ${r.protocol || "ANY"} / ${r.per_unit} per unit)`
-  );
+  console.log(`    proxy  ${r.id.padEnd(16)} ${r.label} (${r.per_unit} per unit)`);
 }

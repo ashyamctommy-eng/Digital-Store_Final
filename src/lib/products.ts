@@ -32,8 +32,7 @@ export interface Product {
    *  - "credentials" (default): a pre-bought account line from inventory.
    *  - "sms": a phone number + inbox, served from pre-bought stock first and
    *    from the on-demand provider only when static stock runs out.
-   *  - "proxy": an IP:PORT list from the proxy provider, with pre-bought
-   *    IP:PORT stock preferred for the same reason.
+   *  - "proxy": an IP:PORT list stocked by hand, claimed in whole units.
    */
   delivery_kind?: "credentials" | "sms" | "proxy";
   /** Required when delivery_kind is "sms". Drives the on-demand provider. */
@@ -47,12 +46,8 @@ export interface Product {
     /** Display label for the service being verified. */
     label: string;
   };
-  /** Required when delivery_kind is "proxy". Drives the proxy provider. */
+  /** Required when delivery_kind is "proxy". */
   proxy?: {
-    /** ISO country code the pool is filtered to ("" or "ALL" for any). */
-    country: string;
-    /** Protocol filter: https, socks4, socks5 ("" for any). */
-    protocol: string;
     /** How many addresses one unit of this product is worth. */
     per_unit: number;
     /** Display label for the network being supplied. */
@@ -470,8 +465,8 @@ export const products: Product[] = [
     country_flags: "🌐",
     price_usd: 46.00,
     image: "/assets/images/proxy-logo.svg",
-    // Availability comes from pre-bought IP:PORT stock or the proxy provider,
-    // never from a hard-coded number.
+    // Availability comes from IP:PORT stock the admin uploads, never from a
+    // hard-coded number.
     stock: 0,
     description:
       "Clean static residential proxies for multi-accounting and scrapers",
@@ -487,7 +482,7 @@ export const products: Product[] = [
     featured: true,
     delivery: "Instant",
     delivery_kind: "proxy",
-    proxy: { country: "US", protocol: "https", per_unit: 10, label: "Static IPs" },
+    proxy: { per_unit: 10, label: "Static IPs" },
   },
   {
     /*
@@ -533,7 +528,7 @@ export const products: Product[] = [
     badge: "Hot",
     delivery: "Within 1 hour",
     delivery_kind: "proxy",
-    proxy: { country: "US", protocol: "socks5", per_unit: 5, label: "Mobile IPs" },
+    proxy: { per_unit: 5, label: "Mobile IPs" },
   },
   {
     id: "proxy-dc-03",
@@ -553,7 +548,7 @@ export const products: Product[] = [
     guide_url: "",
     delivery: "Instant",
     delivery_kind: "proxy",
-    proxy: { country: "", protocol: "https", per_unit: 25, label: "Datacenter IPs" },
+    proxy: { per_unit: 25, label: "Datacenter IPs" },
   },
 ];
 
@@ -685,19 +680,15 @@ export function isProxyProduct(product: Product): boolean {
 }
 
 export interface ProxySpec {
-  country: string;
-  protocol: string;
   per_unit: number;
   label: string;
 }
 
-/** The proxy provider spec for a proxy product, if it has one. */
+/** The stock spec for a proxy product, if it has one. */
 export function getProxySpec(productId: string): ProxySpec | null {
   const product = products.find((p) => p.id === productId);
   if (!product || !product.proxy) return null;
   return {
-    country: product.proxy.country,
-    protocol: product.proxy.protocol,
     per_unit: Math.max(1, product.proxy.per_unit),
     label: product.proxy.label,
   };

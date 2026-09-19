@@ -152,9 +152,8 @@ async function main() {
      (usually public_html/) via cPanel File Manager or FTP.
   2. On the server: copy dist/api/config.sample.php to dist/api/config.php
      and fill in your Palplus + NOWPayments keys and public_base_url.
-     Optional: smsotp.api_key (on-demand SMS) and nextproxy (on-demand
-     proxies). The proxy integration is off until you set
-     nextproxy.enabled => true; read dist/api/DEVELOPER-NOTES.md first.
+     Optional: smsotp.api_key enables on-demand SMS numbers. Proxy products
+     have no provider — upload their IP:PORT stock in the admin console.
   3. chmod 755 (or 775) dist/api/data AND dist/api/data/inventory so PHP can
      write the order ledger and the credential queue.
   4. Point the Palplus channel callback and the NOWPayments IPN at

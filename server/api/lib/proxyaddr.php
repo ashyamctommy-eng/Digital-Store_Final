@@ -15,7 +15,29 @@
 declare(strict_types=1);
 
 /**
- * True for routable public addresses only.
+ * Whether private and loopback addresses are currently accepted.
+ *
+ * Off for everything that stores stock: an unroutable address sold to a buyer is
+ * a guaranteed support ticket, and a private one could point a customer's
+ * traffic at an internal host.
+ *
+ * The proxy checker turns it on for its own request when
+ * `proxycheck.allow_private` is set, because testing an address and selling it
+ * are different acts — an owner with a proxy on their own LAN should be able to
+ * check it without being able to upload it. Uploads never set this.
+ */
+function proxy_set_allow_private(bool $allow): void
+{
+    $GLOBALS['__proxy_allow_private'] = $allow;
+}
+
+function proxy_allow_private(): bool
+{
+    return (bool) ($GLOBALS['__proxy_allow_private'] ?? false);
+}
+
+/**
+ * True for routable public addresses only (unless overridden, see above).
  *
  * `FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE` covers private space,
  * loopback, link-local and 240/4 — but it does NOT reject the documentation and
@@ -33,6 +55,12 @@ function proxy_public_ip(string $ip): bool
     // Strip brackets from a bracketed IPv6 literal.
     if (str_starts_with($ip, '[') && str_ends_with($ip, ']')) {
         $ip = substr($ip, 1, -1);
+    }
+
+    // Check-mode only: accept anything that is a syntactically valid address so
+    // a local test proxy can be verified.
+    if (proxy_allow_private()) {
+        return filter_var($ip, FILTER_VALIDATE_IP) !== false;
     }
 
     $flags = FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE;
@@ -152,6 +180,92 @@ function proxy_format_entry($entry): string
     }
 
     return proxy_format_pair($ip, $port);
+}
+
+/**
+ * Parses one pasted proxy line into address + credentials.
+ *
+ * The owner uploads these by hand, and proxies get written down in whatever
+ * order the seller quoted them, so all of the common spellings are accepted:
+ *
+ *   HOST:PORT                       credentials held separately, or none
+ *   USER:PASS@HOST:PORT             credentials first
+ *   HOST:PORT:USER:PASS             credentials last
+ *   HOST:PORT | USER:PASS           pipe separated
+ *
+ * An optional scheme (`socks5://`, `http://`) is tolerated and reported but not
+ * trusted — the checker detects the protocol that actually works.
+ *
+ * Splitting is done from the right where it has to be: a password may itself
+ * contain ':' or '@', so `USER:PASS@HOST:PORT` splits on the LAST '@' and
+ * `HOST:PORT:USER:PASS` takes the first two segments as the address and keeps
+ * the remainder as `USER:PASS`.
+ *
+ * @return array{ok:bool, address:string, host:string, port:string,
+ *               username:string, password:string, scheme:string, reason:?string}
+ */
+function proxy_parse_line(string $line): array
+{
+    $raw = trim($line);
+    $out = [
+        'ok' => false, 'address' => '', 'host' => '', 'port' => '',
+        'username' => '', 'password' => '', 'scheme' => '',
+        'reason' => 'Not a public IP:PORT address.',
+    ];
+    if ($raw === '') {
+        return $out;
+    }
+
+    // A scheme prefix adds nothing we trust, but rejecting the line over it
+    // would be unhelpful.
+    if (preg_match('#^([a-z0-9]+)://(.+)$#i', $raw, $m) === 1) {
+        $out['scheme'] = strtolower($m[1]);
+        $raw = $m[2];
+    }
+
+    $addressPart = $raw;
+    $credPart = '';
+
+    if (str_contains($raw, '|')) {
+        $parts = array_map('trim', explode('|', $raw, 2));
+        $addressPart = $parts[0];
+        $credPart = $parts[1] ?? '';
+    } elseif (str_contains($raw, '@')) {
+        $at = (int) strrpos($raw, '@');
+        $credPart = substr($raw, 0, $at);
+        $addressPart = substr($raw, $at + 1);
+    } elseif (preg_match('/^(\[[0-9a-fA-F:]+\]):(\d{1,5})(?::(.*))?$/', $raw, $m) === 1) {
+        $addressPart = $m[1] . ':' . $m[2];
+        $credPart = $m[3] ?? '';
+    } elseif (preg_match('/^([^\s:]+):(\d{1,5}):(.*)$/', $raw, $m) === 1) {
+        $addressPart = $m[1] . ':' . $m[2];
+        $credPart = $m[3];
+    }
+
+    $address = proxy_normalize_address($addressPart);
+    if ($address === '') {
+        return $out;
+    }
+
+    $out['address'] = $address;
+    $position = strrpos($address, ':');
+    $out['host'] = $position === false ? $address : substr($address, 0, $position);
+    $out['port'] = $position === false ? '' : substr($address, $position + 1);
+
+    $credPart = trim($credPart);
+    if ($credPart !== '') {
+        $split = strpos($credPart, ':');
+        if ($split === false) {
+            $out['username'] = $credPart;
+        } else {
+            $out['username'] = substr($credPart, 0, $split);
+            $out['password'] = substr($credPart, $split + 1);
+        }
+    }
+
+    $out['ok'] = true;
+    $out['reason'] = null;
+    return $out;
 }
 
 /** Deduplicates a list of addresses, dropping anything unusable. */

@@ -67,12 +67,13 @@ export function buildOrderText(
 
       if (cred.kind === "proxy") {
         const proxies = cred.proxies ?? [];
+        const auth = cred.proxy_auth ?? {};
         out.push(`Proxies (${proxies.length}):`);
         for (const address of proxies) {
-          out.push(`  ${address}`);
+          // Credentials inline: a proxy that needs auth is unusable without them.
+          const inline = auth[address];
+          out.push(`  ${inline ? `${inline}@${address}` : address}`);
         }
-        if (cred.proxy_country) out.push(`Country: ${cred.proxy_country}`);
-        if (cred.proxy_protocol) out.push(`Protocol: ${cred.proxy_protocol}`);
         if (cred.notes) out.push(`Notes:   ${cred.notes}`);
         out.push("");
         continue;
@@ -170,7 +171,13 @@ export function allCredentialsText(credentials: DeliveredCredential[]): string {
   return credentials
     .map((c) => {
       if (c.kind === "proxy") {
-        return (c.proxies ?? []).join("\n");
+        const auth = c.proxy_auth ?? {};
+        return (c.proxies ?? [])
+          .map((address) => {
+            const inline = auth[address];
+            return inline ? `${inline}@${address}` : address;
+          })
+          .join("\n");
       }
       if (c.kind === "sms") {
         return c.phone_number ?? c.uid;

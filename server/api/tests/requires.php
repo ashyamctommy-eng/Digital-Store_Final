@@ -35,6 +35,29 @@ function collect_php_files(string $root): array
     return $files;
 }
 
+/**
+ * Every file a source file requires, with the literal path resolved.
+ *
+ * @return list<string> absolute paths that are required but missing
+ */
+function missing_required_files(string $path, string $source): array
+{
+    $missing = [];
+    if (preg_match_all(
+        '/\brequire(?:_once)?\s*\(?\s*__DIR__\s*\.\s*[\'"]([^\'"]+)[\'"]/',
+        $source,
+        $matches
+    ) !== false) {
+        foreach ($matches[1] as $suffix) {
+            $target = dirname($path) . $suffix;
+            if (!is_file($target)) {
+                $missing[] = $target;
+            }
+        }
+    }
+    return $missing;
+}
+
 /** Strips comments and string literals so scans do not match prose. */
 function strip_noise(string $src): string
 {
@@ -157,6 +180,18 @@ foreach ($files as $file) {
                 );
             }
         }
+    }
+}
+
+// A require pointing at a file that no longer exists only blows up when that
+// file is loaded, which may be on one rarely-hit endpoint.
+foreach ($files as $file) {
+    foreach (missing_required_files($file, (string) file_get_contents($file)) as $target) {
+        $problems[] = sprintf(
+            '%s requires %s, which does not exist',
+            str_replace($root . '/', '', $file),
+            str_replace($root . '/', '', $target)
+        );
     }
 }
 

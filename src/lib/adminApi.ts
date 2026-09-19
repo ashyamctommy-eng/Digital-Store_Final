@@ -137,89 +137,6 @@ export function adminSmsotpStatus(): Promise<ApiResult<SmsotpStatusResponse>> {
   return adminFetch("/admin/smsotp-status", { method: "GET" });
 }
 
-/* ------------------------------- nextproxy ------------------------------ */
-
-/**
- * Live status of the on-demand proxy supply.
- *
- * Note what `credits_*` means here: the provider documents a credit balance and
- * a developer console to recharge it, but the live service exposes neither — its
- * `/api/profile` and `/api/credits` routes return 404, and the documented
- * `X-Credits-Remaining` header is never sent. What it really returns is a
- * rate-limit window, so `rate_remaining` is the number that reflects reality and
- * `credits_remaining` stays null unless a real credits source exists.
- */
-export interface NextProxyStatus {
-  ok: boolean;
-  enabled: boolean;
-  reachable: boolean;
-  key_present: boolean;
-  key_masked: string;
-  key_source: "settings" | "config" | "env" | "none";
-  base: string;
-  path: string;
-  auth_style: string;
-  tier: string | null;
-  pool_total: number | null;
-  rate_limit: number | null;
-  rate_remaining: number | null;
-  rate_reset: number | null;
-  credits_remaining: number | null;
-  credits_used: number | null;
-  credits_source: string | null;
-  /** A few real addresses, so the admin can see what a buyer would receive. */
-  sample: string[];
-  error: string | null;
-  checked_at: string;
-  cached?: boolean;
-}
-
-export interface NextProxyStatusResponse {
-  status: NextProxyStatus;
-  products: {
-    product_id: string;
-    label: string;
-    country: string;
-    protocol: string;
-    per_unit: number;
-  }[];
-  credits_source: string | null;
-  rate_limit_source: string | null;
-  profile_configured: boolean;
-  /** True when the key's credit balance is running low. */
-  credits_low?: boolean;
-  credits_low_threshold?: number;
-  /** What refreshing the console just cost, in credits (0 when cached). */
-  probe_cost_credits?: number;
-}
-
-export interface NextProxyKeyResponse {
-  saved: boolean;
-  key_present: boolean;
-  key_masked: string;
-  key_source: string;
-  status: NextProxyStatus;
-}
-
-/** Proxy provider status. Pass refresh to bypass the server-side cache. */
-export function adminNextProxyStatus(
-  refresh = false
-): Promise<ApiResult<NextProxyStatusResponse>> {
-  return adminFetch(`/admin/nextproxy-status${refresh ? "?refresh=1" : ""}`, {
-    method: "GET",
-  });
-}
-
-/** Stores or clears the proxy provider key. Empty string clears it. */
-export function adminSaveNextProxyKey(
-  apiKey: string
-): Promise<ApiResult<NextProxyKeyResponse>> {
-  return adminFetch("/admin/nextproxy-key", {
-    method: "POST",
-    body: JSON.stringify({ apiKey }),
-  });
-}
-
 export function adminDeleteUnit(
   productId: string,
   unitId: string
@@ -227,6 +144,18 @@ export function adminDeleteUnit(
   return adminFetch("/admin/inventory/delete", {
     method: "POST",
     body: JSON.stringify({ productId, unitId }),
+  });
+}
+
+/* ------------------------------ proxy checker ---------------------------- */
+
+/** Grade and rank proxies before they are sold. Admin key required. */
+export function adminCheckProxies(
+  input: { text: string } | { productId: string; status?: string }
+): Promise<ApiResult<import("./payments").ProxyCheckResponse>> {
+  return adminFetch("/admin/proxies/check", {
+    method: "POST",
+    body: JSON.stringify(input),
   });
 }
 
@@ -243,6 +172,9 @@ export interface ParsedLine {
   notes?: string;
   /** The number has no country code, so its country is ambiguous. */
   needsReview?: boolean;
+  /** Proxy only: credentials parsed out of the line. */
+  username?: string;
+  password?: string;
 }
 
 /**
@@ -278,6 +210,67 @@ function isPublicAddress(host: string): boolean {
   if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(bare)) return false;
   if (bare.split(".").some((part) => Number(part) > 255)) return false;
   return !UNROUTABLE_V4.test(bare);
+}
+
+/**
+ * Splits a pasted proxy line the way the server does.
+ *
+ * Accepts every spelling proxy_parse_line() accepts, including the two the
+ * owner asked for explicitly:
+ *
+ *   USER:PASS@HOST:PORT     credentials first
+ *   HOST:PORT:USER:PASS     credentials last
+ *
+ * Splits from the right where it must: a password can contain ':' or '@'.
+ */
+export function parseProxyLine(
+  line: string
+): { address: string; username: string; password: string } | null {
+  let raw = line.trim();
+  if (!raw) return null;
+
+  // A scheme prefix adds nothing we trust; the checker detects the protocol.
+  raw = raw.replace(/^[a-z0-9]+:\/\//i, "");
+
+  let addressPart = raw;
+  let credPart = "";
+
+  if (raw.includes("|")) {
+    const [a, b] = raw.split("|", 2);
+    addressPart = a.trim();
+    credPart = (b ?? "").trim();
+  } else if (raw.includes("@")) {
+    const at = raw.lastIndexOf("@");
+    credPart = raw.slice(0, at).trim();
+    addressPart = raw.slice(at + 1).trim();
+  } else {
+    const bracketed = raw.match(/^(\[[0-9a-fA-F:]+\]):(\d{1,5})(?::(.*))?$/);
+    const colonForm = raw.match(/^([^\s:]+):(\d{1,5}):(.*)$/);
+    if (bracketed) {
+      addressPart = `${bracketed[1]}:${bracketed[2]}`;
+      credPart = (bracketed[3] ?? "").trim();
+    } else if (colonForm) {
+      addressPart = `${colonForm[1]}:${colonForm[2]}`;
+      credPart = colonForm[3].trim();
+    }
+  }
+
+  const address = normalizeProxyAddress(addressPart);
+  if (!address) return null;
+
+  let username = "";
+  let password = "";
+  if (credPart) {
+    const split = credPart.indexOf(":");
+    if (split === -1) {
+      username = credPart;
+    } else {
+      username = credPart.slice(0, split);
+      password = credPart.slice(split + 1);
+    }
+  }
+
+  return { address, username, password };
 }
 
 function normalizeProxyAddress(value: string): string {
@@ -330,17 +323,16 @@ export function parseCredentialLines(
     }
 
     if (kind === "proxy") {
-      // Mirrors proxy_normalize_address() on the server: an address without a
-      // routable public IP and a real port is refused rather than stored.
-      const rawAddress = line.includes("|") ? fields[0] : line;
-      const address = normalizeProxyAddress(rawAddress);
-      if (!address) continue;
-      const extra = line.includes("|") ? fields[1] ?? "" : "";
+      // Mirrors proxy_parse_line() on the server, so the admin sees exactly the
+      // addresses and credentials that will be stored.
+      const parsed = parseProxyLine(line);
+      if (!parsed) continue;
       out.push({
-        uid: address,
+        uid: parsed.address,
         secret: line,
         fields,
-        notes: extra || undefined,
+        username: parsed.username || undefined,
+        password: parsed.password || undefined,
         wellFormed: true,
       });
       continue;

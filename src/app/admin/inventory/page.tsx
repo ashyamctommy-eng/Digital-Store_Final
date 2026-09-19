@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { categories, getCategory } from "@/lib/categories";
 import { isProxyProduct, isSmsProduct, products } from "@/lib/products";
+import ProxyCheckPanel from "@/components/ProxyCheckPanel";
 import { formatPrice } from "@/lib/currency";
 import Icon from "@/components/ui/Icon";
 import {
@@ -379,6 +380,12 @@ export default function AdminInventoryPage() {
                   {parsed.length > 3 && <li>+{parsed.length - 3} more</li>}
                 </ul>
               </div>
+            )}
+
+            {/* Proxy stock is worth testing before it is sold, so the checker
+                sits next to the upload box. */}
+            {selectedIsProxy && (
+              <ProxyCheckPanel productId={productId} pastedText={text} />
             )}
 
             {error && (

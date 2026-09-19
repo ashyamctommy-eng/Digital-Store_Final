@@ -292,7 +292,12 @@ export default function OrderDetailsModal({
                   </div>
                   <ul className="divide-y divide-[var(--color-line)]">
                     {proxyUnits.map((cred, i) => (
-                      <ProxyListCard key={`${cred.uid}-${i}`} cred={cred} />
+                      <ProxyListCard
+                        key={`${cred.uid}-${i}`}
+                        cred={cred}
+                        orderId={order.orderId}
+                        token={order.token}
+                      />
                     ))}
                   </ul>
                 </div>

@@ -60,26 +60,19 @@ This is **Digital Hub Shop**, a static-exported digital products marketplace
 - If you add a lib that calls a helper from another lib, add the `require_once`.
   `npm run test:php:requires` catches this, and it has been a real bug twice.
 
-### On-demand proxy supply
+### Proxy stock and the checker
 
-- `nextproxy.enabled` defaults to **false**. Keep it that way: a default of true
-  once let an unconfigured install (and the unit tests) call the live provider.
+- Proxy addresses are **uploaded by hand**. There is no on-demand proxy provider;
+  an earlier integration with one was removed deliberately, along with its
+  client, admin endpoints and stub. Do not reintroduce a provider without the
+  owner asking.
 - `server/api/lib/proxyaddr.php` is the single source of truth for "is this a
-  deliverable address?". Both hand-pasted stock and provider responses go through
-  it. Do not add a second validator — the two would drift.
+  deliverable address?". Both the stock parser and the checker go through it. Do
+  not add a second validator — the two would drift.
 - Proxy units are counted in **addresses**, not units, and only whole units are
   delivered. A partial batch is a shortfall, never a discount.
-- `POST /api/admin/nextproxy-key` writes through `lib/settings.php`, which only
-  accepts keys in `SETTINGS_WRITABLE`. Never widen that list casually, and never
-  return a stored secret unmasked.
-- The provider has no credits ROUTE, but it does send credit headers to
-  authenticated callers. Do not "fix" the console by inventing a balance, and do
-  not conclude credits are absent from an unauthenticated probe — that mistake
-  is in the git history.
-- Cost is per REQUEST (1 credit regardless of `limit`) and `/api/health` is
-  free. Never put a credit-spending call on a page-load path: availability is
-  `nextproxy_can_dispatch()` → cached health, and the sampled probe is admin-only
-  and cached for 30 minutes.
-- Paging must send `page` **and keep the page size constant**, and must compare
-  the RAW row count to the page size. The free tier masks ~25% of rows, so a
-  full page is legitimately short of usable addresses.
+- The checker only ever tests addresses the buyer already owns (token-gated) or
+  that an admin pasted. Never let it become an open proxy-testing service, and
+  keep the per-request cap.
+- The IP score is our own heuristic, not a reputation lookup. Do not describe it
+  to customers as a fraud or abuse score.

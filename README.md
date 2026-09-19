@@ -204,46 +204,58 @@ an optional embedded frame.
 > since a real inbox needs its own cookies to show anything, and that flag is
 > only dangerous when the framed document shares our origin.
 
-### On-demand proxy supply
+### Proxy stock (uploaded by hand)
 
-Proxy products are marked `delivery_kind: "proxy"` and fulfil in the same order
-as SMS, from a fixed chain:
+Proxy products are marked `delivery_kind: "proxy"`. They have **no on-demand
+provider** — addresses are uploaded in the admin console and claimed from stock:
 
 | # | Source | When it is used |
 | --- | --- | --- |
-| 1 | **Pre-bought stock** | Always tried first — addresses the admin uploaded as `IP:PORT`. |
-| 2 | **On-demand pool** ([NextProxy](https://console.nextproxy.site)) | Only when pre-bought stock cannot make a whole unit. |
-| 3 | **Out of Stock** | Neither available: purchase is disabled. |
+| 1 | **Uploaded stock** | `IP:PORT` lines pasted in Stock & Credentials. |
+| 2 | **Out of Stock** | Queue empty: purchase is disabled. |
 
-One unit of a proxy product is worth `per_unit` addresses (10 IPs, 25 IPs…), so
-both sources are counted in **addresses** and only chunked into units afterwards.
-Only whole units are delivered: a buyer who paid for 10 addresses is never handed
-7 because the pool ran dry — that becomes a shortfall instead, and the stranded
+One unit of a proxy product is worth `per_unit` addresses ("10 IPs", "25 IPs"),
+so claiming is counted in **addresses** and chunked into units afterwards. Only
+whole units are delivered: a buyer who paid for 10 addresses is never handed 7
+because the queue ran short — that becomes a shortfall, and the leftover
 addresses stay in stock for the next order.
 
-Addresses are validated by one shared module (`lib/proxyaddr.php`) for both
-hand-pasted stock and provider responses. Private, loopback, link-local,
-carrier-NAT and documentation ranges (`192.0.2.0/24`, `198.51.100.0/24`,
-`203.0.113.0/24`) are refused — they cannot route for a buyer, so selling one is
-a guaranteed support ticket.
+**Accepted line formats** (one per line):
 
-The integration is **opt-in**: `nextproxy.enabled` defaults to `false` so no store
-silently starts sourcing addresses from a third party.
+```
+203.0.113.10:8080                       host:port
+user:pass@203.0.113.10:8080             credentials first
+203.0.113.10:8080:user:pass             credentials last
+203.0.113.10:8080 | user:pass           pipe separated
+```
 
-> **Read `server/api/DEVELOPER-NOTES.md` before enabling this.** The pool is a
-> shared, publicly-mirrored set of proxies, not dedicated residential or mobile
-> lines, and two of the catalog's proxy descriptions do not match what it
-> supplies. The notes also record where the provider's documentation and the
-> live behaviour disagree — including that a free key gives the same
-> 60 requests/minute as no key at all, and that the free tier masks a share of
-> every page (71–80% of rows are usable).
->
-> Cost is **per request, not per address** (1 credit whatever the limit), and
-> `/api/health` is the only free endpoint — which is why the storefront's
-> availability check uses it. A free key comes with 1,000 credits, so spending
-> one per page view would empty it in about three days.
+Addresses are validated by `lib/proxyaddr.php` before they are stored. Private,
+loopback, link-local, carrier-NAT and documentation ranges (`192.0.2.0/24`,
+`198.51.100.0/24`, `203.0.113.0/24`) are refused — they cannot route for a buyer,
+so storing one is a guaranteed support ticket.
 
-### Order history and credentials
+### Proxy checker
+
+Buyers and admins can test proxies instead of trusting them.
+`POST /api/orders/proxies-check` (token-gated, buyer) and
+`POST /api/admin/proxies/check` (admin key) connect **through** each proxy to
+this site's own `/api/proxies/echo`, which reports the exit IP and the forwarding
+headers it saw. From that, each address is graded on:
+
+| Signal | How it is measured |
+| --- | --- |
+| **Health** | did the request complete inside the timeout |
+| **Speed** | round-trip milliseconds, banded Excellent → Slow |
+| **Anonymity** | `elite` when our IP never leaks and no forwarding headers arrive, `anonymous` when headers appear but our IP does not, `transparent` when our own IP is forwarded |
+| **Type** | which of HTTP(S), SOCKS5, SOCKS4 actually carried the request |
+| **IP score** | 0–100 composite of the above, used to rank the list |
+
+The score is a **quality heuristic computed here**, not a reputation database —
+it says how well an address performs, not whether it has a bad history. The
+echo endpoint is used instead of a public service so checking costs nothing and
+does not depend on a third party.
+
+### Order history and credentials### Order history and credentials
 
 `/account/orders` lists orders from a local index (`dhs.orders.v1`), merged with
 Firestore for signed-in customers. The Order Details modal shows the purchased

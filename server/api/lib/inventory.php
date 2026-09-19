@@ -157,11 +157,12 @@ function inventory_normalize_phone($value): string
  * otherwise — so an admin can paste either without getting it wrong.
  *
  * Proxies (`$kind = "proxy"`), one per line:
- *   IP:PORT
- *   IP:PORT | USER:PASS
- *   IP:PORT:USER:PASS
- * The address is validated with the same rules the provider client uses, so a
- * hand-pasted private address and a provider address are judged identically.
+ *   HOST:PORT
+ *   USER:PASS@HOST:PORT
+ *   HOST:PORT:USER:PASS
+ *   HOST:PORT | USER:PASS
+ * See proxy_parse_line(): the address and any credentials are split out, and the
+ * address is validated by the same rules everything else uses.
  *
  * Blank lines and `#` comments are ignored. Duplicate lines within one batch
  * are dropped so a double paste does not create phantom stock.
@@ -221,37 +222,29 @@ function inventory_parse_lines(string $text, string $kind = 'credentials', ?arra
         }
 
         if ($kind === 'proxy') {
-            // "IP:PORT", "IP:PORT | USER:PASS" or "IP:PORT:USER:PASS".
-            $address = $line;
-            $extra = '';
-            if (str_contains($line, '|')) {
-                $parts = array_map('trim', explode('|', $line));
-                $address = $parts[0];
-                $extra = $parts[1] ?? '';
-            } elseif (preg_match('/^(\[[0-9a-fA-F:]+\]|[^\s:]+):(\d{1,5}):(.*)$/', $line, $m) === 1) {
-                // Trailing credentials: keep only the first two segments.
-                $address = $m[1] . ':' . $m[2];
-                $extra = $m[3];
-            }
-
-            $normalised = proxy_normalize_address($address);
-            if ($normalised === '') {
+            $parsedProxy = proxy_parse_line($line);
+            if (!$parsedProxy['ok']) {
                 // Refused rather than stored — a private, malformed or
                 // placeholder address would be dead on arrival for the buyer.
-                // Collected so the admin sees exactly which lines were
-                // dropped instead of wondering why the count is short.
-                $rejected[] = ['line' => $line, 'reason' => 'Not a public IP:PORT address.'];
+                // Collected so the admin sees exactly which lines were dropped
+                // instead of wondering why the count is short.
+                $rejected[] = ['line' => $line, 'reason' => (string) $parsedProxy['reason']];
                 continue;
             }
 
             $units[] = [
                 'id' => bin2hex(random_bytes(8)),
                 'kind' => 'proxy',
-                'uid' => $normalised,
-                'proxy' => $normalised,
+                'uid' => $parsedProxy['address'],
+                'proxy' => $parsedProxy['address'],
+                // Credentials are optional and kept verbatim; the checker and
+                // the buyer's client both need them.
+                'username' => $parsedProxy['username'],
+                'password' => $parsedProxy['password'],
+                'scheme_hint' => $parsedProxy['scheme'],
                 'secret' => $line,
                 'fields' => array_slice($fields, 0, 4),
-                'notes' => substr($extra, 0, 300),
+                'notes' => '',
                 'status' => 'available',
                 'order_id' => null,
                 'added_at' => gmdate('c'),

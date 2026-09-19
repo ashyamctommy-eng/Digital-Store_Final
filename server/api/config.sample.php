@@ -66,51 +66,32 @@ return [
     ],
 
     // ---------------------------------------------------------------
-    // NextProxy — on-demand proxy supply (delivery_kind "proxy")
-    // Console: https://console.nextproxy.site
+    // Proxy checker
     //
-    // Used ONLY as a fallback: pre-bought IP:PORT stock is always tried first,
-    // so the provider is only called when that runs out.
+    // Tests uploaded addresses by sending a request THROUGH each one to a
+    // reflector on this site, so "working" means it carried a request rather
+    // than merely accepting a connection.
     //
-    // The API key is OPTIONAL. The provider serves its pool to unauthenticated
-    // callers; a key is validated when supplied, and a wrong one fails every
-    // request. Set it in the admin console, here, or via NEXTPROXY_API_KEY —
-    // the admin console value wins.
+    // Leave echo_url empty to use {public_base_url}/api/proxies/echo, which is
+    // correct for any normal deployment. Set it only if the public URL is not
+    // reachable from the server itself (e.g. testing on localhost).
     // ---------------------------------------------------------------
-    'nextproxy' => [
-        'api_key' => '',
-        'api_base' => 'https://console.nextproxy.site',
-        // The documented list route. `/api/list` returns the same pool.
-        'list_path' => '/api/proxies',
-        // 'header' sends X-API-Key; 'query' appends ?key= (the original spec);
-        // 'both' sends it twice. Header keeps the key out of access logs.
-        'auth_style' => 'header',
-        // Off switch for the whole integration.
-        'enabled' => true,
-        // Credits/profile endpoint. LEAVE EMPTY — the provider has none
-        // (`/api/profile` returns 404), and quota is read from the
-        // x-ratelimit-* response headers instead. Only set this if your
-        // account is ever given a real credits endpoint.
-        'profile_path' => '',
-        // Largest page to request; guests are capped at 100 by the provider.
-        'max_batch' => 100,
-        // Safety ceiling on the addresses a single order can buy.
-        'max_per_order' => 500,
-        'timeout_seconds' => 20,
-        // --- Costs real credits. Read before changing. ---
-        // Verified against a live key: every request that returns addresses
-        // costs 1 credit whatever the limit (limit=1 and limit=100 both cost 1),
-        // while /api/health is free. A free key comes with 1,000 credits.
-        //
-        // The storefront's "is this available?" check therefore uses the FREE
-        // health endpoint, cached for health_cache_seconds. The sampled probe
-        // below costs 1 credit, so it is cached for half an hour and only
-        // refreshed when an admin asks for it.
-        'health_path' => '/api/health',
-        'health_cache_seconds' => 600,
-        'status_cache_seconds' => 1800,
-        // How many sample addresses the admin console shows (still 1 credit).
-        'status_sample' => 3,
+    'proxycheck' => [
+        'echo_url' => '',
+        // Per-attempt limit. A proxy slower than this reads as dead, which is
+        // the honest answer for anything a buyer would wait on.
+        'timeout_seconds' => 8,
+        // Addresses tested at once. Higher finishes a batch sooner but opens
+        // more sockets; 10 is comfortable on shared hosting.
+        'concurrency' => 10,
+        // Caps so one click cannot hold a PHP worker for minutes.
+        'max_admin' => 100,
+        'max_buyer' => 50,
+        // Allow checking private/loopback addresses. Off for stock (an
+        // unroutable address is a guaranteed support ticket), and this only
+        // widens what the CHECKER will probe — uploads stay strict. Turn it on
+        // only to test a proxy on your own network.
+        'allow_private' => false,
     ],
 
     // ---------------------------------------------------------------
