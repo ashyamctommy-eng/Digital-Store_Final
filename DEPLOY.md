@@ -1,118 +1,329 @@
-# Deploying to HostNin / cPanel
+# Upload guide — cPanel / Hostinger hPanel
 
-Two ways to get the site onto the server. Pick one and stay with it.
+The complete path from the zip in your downloads folder to a store that can take
+money. Follow it in order; each step ends with something you can check.
+
+Uploading is the lower-risk of the two deployment routes: it never deletes
+anything, so your order ledger and saved credentials cannot be swept away by a
+deploy. (Git deployment is covered in `DEPLOY.md`.)
 
 ---
 
-## Option A — Git deployment (recommended, since you asked for it)
+## Before you start
 
-The repository root is the Next.js **source**, which is not servable: it has
-`src/`, config files and no `index.html`. A host that clones `main` into
-`public_html` would publish a directory of TypeScript.
+| Need | Why |
+| --- | --- |
+| Your domain pointing at the hosting | The site is served from the document root |
+| **SSL active** (padlock on `https://`) | Palplus rejects plain HTTP callbacks; the `.htaccess` forces HTTPS |
+| **PHP 8.0 or newer** (8.1+ is better) | The code uses `match`, `str_contains`, `array_is_list` |
+| PHP extensions: `curl`, `json`, `hash` | Talking to the gateways and signing webhooks. `mbstring` is used if present but not required |
+| A **new admin key** | Printed below; you will paste it once |
 
-So the build is published to a separate **`deploy` branch** whose root *is* the
-document root:
+You do not need a database. Orders, stock and settings are JSON files.
 
-```bash
-GITHUB_TOKEN=<a PAT with Contents: write> npm run deploy:branch:build
+---
+
+## Step 1 — Get the files onto the server
+
+1. In hPanel, open **Files → File Manager**.
+2. Navigate into your document root. For a main domain this is `public_html/`.
+   For a subdomain it is usually `public_html/subdomain-name/` — check
+   **Websites → Manage → the document root shown for your site**.
+3. Click **Upload** and choose `dist-cpanel.zip`.
+4. Back in the file list, right-click the uploaded zip → **Extract** →
+   extract into the document root (the current folder).
+5. **Delete the zip** afterwards. Leaving it lets anyone download your site's
+   source in one file.
+6. Turn on **Settings → Show hidden files** (the toggle in the File Manager
+   toolbar). You should see `.htaccess` next to `index.html`. If it is missing,
+   the site will load but deep links and the API will break.
+
+Your document root should now look like this:
+
+```
+public_html/
+├── .htaccess          ← must be visible
+├── index.html
+├── 404.html
+├── _next/
+├── assets/
+├── products/          ← one folder per product page
+├── account/
+├── admin/
+└── api/               ← the PHP backend
+    ├── .htaccess
+    ├── config.sample.php
+    ├── data/
+    │   └── inventory/
+    ├── lib/
+    ├── admin/
+    ├── orders/
+    ├── palplus/
+    ├── nowpayments/
+    └── proxies/
 ```
 
-That builds, then force-pushes the contents of `dist/` to `deploy`. Your working
-tree and `main` are untouched — the script stages a throwaway repository in a
-temp directory.
+---
 
-Then in hPanel → **Advanced → Git**:
+## Step 2 — Create `config.php`
 
-| Field | Value |
-| --- | --- |
-| Repository | `https://github.com/ashyamctommy-eng/Digital-Store_Final` |
-| Branch | `deploy` |
-| Directory | your document root, usually blank (= `public_html`) |
-| Deploy on push | optional; otherwise use the Deploy button |
+This file is deliberately **not** in the zip: it holds your admin key, and a key
+in a shared archive is a key on the internet. You create it once, on the server.
 
-### On the server, once
+The bundle ships `api/config.sample.php` with every key documented. The quickest
+safe route is to copy it and edit two lines.
+
+**Option A — File Manager**
+
+1. Select `api/config.sample.php` → **Copy** → destination `api/config.php`.
+2. Right-click `api/config.php` → **Edit**.
+3. Change these two values and save:
+
+```php
+    // Generate your own; see below.
+    'admin_api_key' => 'PASTE_YOUR_GENERATED_KEY',
+
+    // Usually already correct. Leave it unless you are moving the ledger.
+    'data_dir' => __DIR__ . '/data',
+```
+
+Everything else in that file can stay empty — you will fill it in from the
+console in Step 5.
+
+**Generate the admin key.** In hPanel open **Advanced → Terminal**, or use SSH:
 
 ```bash
-cp api/config.sample.php api/config.php
-# set admin_api_key and data_dir in api/config.php
+php -r "echo bin2hex(random_bytes(24));"
+```
+
+If you have neither, run that line on any machine with PHP, or use a password
+manager to generate a 48-character random hex string. **Keep a copy** — it is how
+you unlock the configuration screen. It is also the only thing standing between
+the internet and your gateway keys, so do not use something guessable.
+
+> Changing `admin_api_key` later means editing this file again. It is
+> intentionally impossible to change from the console: a mistyped save there
+> would lock you out of the only screen that could fix it.
+
+---
+
+## Step 3 — Set permissions
+
+PHP writes orders, stock and settings into `api/data/`. If it cannot, payments
+appear to succeed and then nothing is delivered.
+
+Recommended: **755 on directories, 644 on files.**
+
+**File Manager:** select `api/data` → right-click → **Permissions** → `755` →
+tick **Recurse into subdirectories** → apply. Do the same for `api/data/inventory`.
+
+**Terminal / SSH** (from your document root):
+
+```bash
 chmod 755 api/data api/data/inventory
+find . -type d -exec chmod 755 {} \;
+find . -type f -exec chmod 644 {} \;
 ```
 
-Then open `https://your-domain/admin/configurations` and paste every credential
-there. Nothing else needs editing on the server.
-
-### ⚠️ The one thing to check after every deploy
-
-`api/config.php` and `api/data/` are **not** in the repository — one holds your
-admin key, the other holds the order ledger, the stock queue and
-`settings.json` (your gateway keys). They live on the server.
-
-Git cannot delete what it does not track, **unless your host's deploy runs a
-clean**. After a deploy, confirm both still exist:
-
-```bash
-ls -la api/config.php api/data/settings.json api/data/
-```
-
-If they are gone, your host is cleaning untracked files. Either:
-
-- turn that behaviour off in the Git settings, or
-- keep a copy outside the deploy directory and restore it after each deploy, or
-- switch to Option B.
-
-**This is not theoretical:** a first-time setup takes one deploy, but every
-later deploy risks the ledger. Back up `api/data/` before you redeploy once the
-store is live.
+Some shared hosts run PHP as a different user than your cPanel account. If
+Step 6 reports the data directory as not writable, use `775` instead of `755`.
 
 ---
 
-## Option B — Upload the zip (simplest, no risk to your data)
+## Step 4 — Check the site loads
 
-1. Download `dist-cpanel.zip` (the build deliverable).
-2. hPanel → **File Manager** → your document root → **Upload**, then **Extract**.
-   Keep dot-files: `.htaccess` matters.
-3. Do the same one-time steps as above.
-
-Uploading never deletes anything, so `api/data/` and `api/config.php` survive
-untouched. The trade-off is that it is manual and easy to forget a step.
-
----
-
-## Which to choose
-
-| | Git (A) | Zip (B) |
-| --- | --- | --- |
-| One command per release | ✅ | ✗ |
-| Roll back by deploying an older commit | ✅ | ✗ |
-| Cannot endanger `api/data/` | ⚠️ depends on host | ✅ |
-| Works with the host's "deploy on push" | ✅ | ✗ |
-
-**If you want the convenience, use Git but verify `api/data/` after the first
-two deploys.** If you would rather never think about it, upload the zip.
-
-Either way the credentials are pasted once into **Configurations** and live in
-`api/data/settings.json`, so switching between the two later costs nothing.
-
----
-
-## What is deliberately not in the repository
-
-| Path | Why |
+| Check | Expected |
 | --- | --- |
-| `api/config.php` | Holds `admin_api_key`. A key in git is a key on the internet. |
-| `api/data/` | Order ledger, stock queue, `settings.json` — customer data and live credentials. |
+| `https://your-domain/` | The storefront, with products |
+| `https://your-domain/products/whatsapp-sms-verification-number/` | The product page, in the browser bar with a padlock |
+| `http://your-domain/` | Redirects to `https://` |
+| `https://your-domain/api/config-status` | A JSON blob, not a 404 or a download |
 
-`build-cpanel.mjs` strips `api/data/*` and any `config.php` from the bundle, and
-`deploy-branch.mjs` refuses to publish if anything token-shaped is staged.
+`config-status` right now will look like this — that is correct at this stage:
+
+```json
+{"palplus":{"configured":false,"mode":"sandbox","has_channel":false},
+ "nowpayments":{"configured":false,...},
+ "public_base_url":"","data_dir_writable":true,"php_version":"8.2.x"}
+```
+
+The two things to confirm **now** are `"data_dir_writable":true` and a
+`php_version` of 8.0 or higher. If `data_dir_writable` is `false`, go back to
+Step 3 — nothing will work until it is true.
 
 ---
 
-## After the first successful deploy
+## Step 5 — Configure everything in the console
 
-1. `/api/config-status` — the gateways you configured should read `"configured": true`.
-2. **Configurations** — the checklist at the top turns green as you fill it in.
-   Press **Test connection** on each provider; it checks against the live API and
-   tells you what is wrong (wrong key, unverified sending domain, empty Palplus
-   service wallet, no default payment channel).
-3. **Stock & Credentials** — upload your first batch.
-4. Run one small real transaction on each gateway before announcing the store.
+Open `https://your-domain/admin/` and sign in with one of the two Google
+accounts listed in `ADMIN_EMAILS` (in `src/lib/config.ts`):
+
+- `wildpharmtech9@gmail.com`
+- `ashyamctommy@gmail.com`
+
+Then choose **Configurations** in the sidebar. To change who can get in, edit
+that list and rebuild.
+
+Paste your admin key when prompted. It is kept in that browser tab only.
+
+Now fill in each section. After every one, press **Test connection** — it checks
+against the live provider and tells you what is actually wrong.
+
+### General
+
+| Field | What to enter |
+| --- | --- |
+| Environment | `sandbox` while testing, `live` when you are ready |
+| Store name | Shown in order emails |
+| Public site URL | `https://your-domain` — **HTTPS, no trailing slash** |
+
+### Palplus (M-Pesa)
+
+| Field | Where to get it |
+| --- | --- |
+| API key | Palplus console → **Settings → API Keys** (shown once) |
+| Payment channel ID | Palplus console → **Payment Channels**. Optional here, but you **must** set one channel as *default* in their console — otherwise every payment fails with `NO_DEFAULT_CHANNEL` |
+
+Test connection checks four things, and two of them are the failures you cannot
+see any other way:
+
+- **Service wallet** — every STK push deducts a fee from it. If it is empty,
+  payments fail with `402 INSUFFICIENT_SERVICE_BALANCE`. Top it up in the console.
+- **Payment channel** — confirms one can actually be used.
+
+### NOWPayments (crypto)
+
+API key and **IPN secret** (Dashboard → Settings → Payment settings → IPN).
+The secret is what proves an incoming webhook really came from them; without it
+paid orders are not dispatched.
+
+### Resend (order email)
+
+API key, and a **From** address on a domain you have verified in Resend. The
+test reports whether the domain is verified — unverified is the classic silent
+failure where Resend accepts the request and nothing is ever delivered.
+
+### SMS provider (optional)
+
+Add the key to buy numbers on demand when your own stock runs out. Without it,
+SMS products sell only from numbers you upload.
+
+### Proxy checker
+
+Leave the reflector URL **empty** in production; it defaults to
+`https://your-domain/api/proxies/echo`. Test connection confirms your server can
+reach its own reflector.
+
+Press **Save changes** when the checklist at the top of the page turns green.
+
+---
+
+## Step 6 — Register the webhooks
+
+Both gateways need to know where to send results. This is the step that is easy
+to skip and produces "customer paid, nothing delivered".
+
+| Gateway | Where | Value |
+| --- | --- | --- |
+| Palplus | Channel settings in their console | `https://your-domain/api/palplus/webhook` |
+| NOWPayments | Dashboard → Store settings → IPN | `https://your-domain/api/nowpayments/webhook` |
+
+---
+
+## Step 7 — Lock down Firestore (2 minutes, do not skip)
+
+The store does not use Firestore, but your Firebase project still has settings,
+and a Firebase project with no rules of its own is a public database. This is
+the one step that has nothing to do with the files you just uploaded.
+
+1. Open <https://console.firebase.google.com> → pick the project → **Firestore
+   Database → Rules**.
+2. Paste the contents of `deploy/cpanel/firestore.rules` from this repo (it
+   denies every client read and write) and press **Publish**.
+3. Check the existing rules first. If you see
+
+   ```
+   allow read, write: if request.time < timestamp.date(2026, ...)
+   ```
+
+   you are on the default **test mode** rules. They allow anyone who views your
+   page source — your web API key is public — to read and write the whole
+   database, and they stop working entirely on the date shown.
+
+**Why "deny everything" is correct here.** Orders used to be mirrored into a
+Firestore `orders` collection from the browser, and the admin console read that
+collection. That was removed: the browser was supplying the shop's record of a
+sale, so a forged document looked like a real order, and the list the admin saw
+was not the list the webhooks settled against. Orders now live only in the PHP
+ledger you just uploaded, and the admin screens read it through the admin key.
+Nothing in the store reads or writes Firestore any more, so there is nothing to
+grant. Google sign-in still works — Firebase Auth is a separate product and is
+unaffected by these rules.
+
+## Step 8 — Load your stock
+
+**Admin → Stock & Credentials.** Pick a product; the form tells you the accepted
+format for that kind of product:
+
+- **Credentials** (accounts): one line per unit, `UID|Password|Email`
+- **SMS**: `PHONE_NUMBER | INBOX_URL_OR_NOTES` — include the country code
+  (`0712345678` is ambiguous)
+- **Proxy**: `HOST:PORT`, `USER:PASS@HOST:PORT`, `HOST:PORT:USER:PASS` or
+  `HOST:PORT | USER:PASS`
+
+Proxy products also get a **checker**: press *Test pasted list* before saving to
+see which addresses actually work, and *Test stock* later to find any that have
+gone dead.
+
+Use the preview above the button to confirm the lines parsed before committing.
+
+---
+
+## Step 9 — The one thing no test can do for you
+
+**Run one small real transaction on each gateway.**
+
+Everything is covered by hundreds of automated assertions, but those run against
+stubs. Only a real payment proves STK delivery reaches a phone, that the webhook
+arrives at your domain, and that the credentials email is accepted. Buy the
+cheapest product in your own store, and check:
+
+1. The M-Pesa prompt arrives.
+2. The order flips to paid.
+3. The credentials appear under **Account → My Orders**.
+4. The email arrives (check spam).
+5. `api/data/` on the server contains a new order file.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+| --- | --- |
+| Every URL shows the homepage | A blanket SPA rewrite is active. The shipped `.htaccess` deliberately has it commented out; do not enable it |
+| Deep links 404, homepage works | `.htaccess` was not uploaded (hidden files were off) or `AllowOverride` is disabled on the host |
+| `{"error":"CONFIG_MISSING"}` on every API call | `api/config.php` does not exist — Step 2 |
+| `data_dir_writable: false` | Step 3; try 775 |
+| API returns 500 | Almost always a missing `config.php` or an unwritable `api/data`. Check hPanel → **Advanced → Error Log** |
+| "Could not save" in Configurations | `api/data` is not writable |
+| Payments fail with `NO_DEFAULT_CHANNEL` | Set a default payment channel in the Palplus console |
+| Payments fail with `INSUFFICIENT_SERVICE_BALANCE` | Top up the Palplus service wallet |
+| Customer paid, nothing delivered | The webhook URL is wrong, or the NOWPayments IPN secret is missing |
+| No order emails | Resend domain not verified — press Test connection |
+| Proxies sell but arrive dead | Upload a batch, then use *Test pasted list* before saving |
+
+---
+
+## After launch
+
+- **Back up `api/data/` regularly.** It holds every order, the stock queue and
+  your gateway settings. A weekly download via File Manager is enough.
+- **`api/config.php` is your recovery key.** If the console is ever inaccessible,
+  that file still gets you in.
+- **Rotate credentials periodically.** The Palplus console can issue a new key;
+  paste it into Configurations and the store switches over without a redeploy.
+- **Re-run the bundle check before any future upload** — `npm run verify:bundle`
+  refuses to bless a build that contains a key or is missing a file.
+- **Re-check Firestore rules after any Firebase console change.** The shipped
+  rules deny everything, which is what the store needs; if you ever add a
+  collection there, add a rule for it in the same sitting.
