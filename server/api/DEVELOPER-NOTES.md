@@ -20,6 +20,35 @@ identical responses.
 | API key format `nex_live_…` | Nothing documents a key format. A key is not required at all — see below. |
 | "Remaining API credits fetched from the NextProxy profile endpoint" | **No such endpoint exists.** `/api/profile` and `/api/credits` both return `{"error":"Endpoint not found"}` with HTTP 404. |
 
+### The `/api/random` shape (a common first-snippet mistake)
+
+`/api/random` wraps the address in a `proxy` object — it is **not** flat:
+
+```json
+{"status":"success",
+ "proxy":{"ip":"147.139.134.0","port":"3011","type":"https","country":"US", …},
+ "clientTier":"Free Starter Tier (60 req/min · Free Pool Only)",
+ "timestamp":"2026-09-19T14:56:11+00:00"}
+```
+
+So `$response['ip']` is undefined and prints an empty string (plus a PHP warning),
+because the address lives at `$response['proxy']['ip']`. Working version:
+
+```php
+$res = json_decode($body, true);
+$proxy = $res['proxy'] ?? null;          // <-- nested, not top level
+if (($res['status'] ?? '') === 'success' && $proxy && empty($proxy['masked'])) {
+    echo "Live Proxy: {$proxy['ip']}:{$proxy['port']}
+";
+} else {
+    echo "No usable proxy (masked row or error).
+";
+}
+```
+
+Note the `masked` check: on the free tier the address frequently comes back as
+`185.162.•••.•••`, and echoing that to a customer is worse than saying nothing.
+
 ### Authentication
 
 A key is **optional**. The pool is served to unauthenticated callers:
@@ -73,26 +102,78 @@ instead of `ip`, nested wrappers, numeric ports and pre-formatted `"ip:port"`
 strings — and skips rows flagged `masked` or `isLocked`, since a masked address
 is not deliverable.
 
-### Quota: rate-limit headers, not credits
+### Quota and cost
 
-The documented `X-Credits-Remaining` / `X-Credits-Used` headers are **never
-sent**. What is really returned:
+**Correction to an earlier reading of this file.** A first probe concluded the
+credit headers were never sent. That was wrong — it was tested without a key.
+Credits exist, they are simply **only reported to authenticated callers**:
 
-```
-x-ratelimit-limit: 60
-x-ratelimit-remaining: 48
-x-ratelimit-reset: 1789828200
-```
+| | anonymous | with a key |
+| --- | --- | --- |
+| `x-ratelimit-limit` / `-remaining` / `-reset` | ✅ | ✅ |
+| `x-credits-remaining` / `x-credits-used` | ❌ absent | ✅ present |
+| tier | `Guest Community Tier (60 req/min)` | `Free Starter Tier (60 req/min · Free Pool Only)` |
 
-The admin console therefore reports **"Requests left"** from those headers, and
-shows `credits_remaining` as `n/a` unless a real credits source exists. It does
-not invent a balance. If your account is ever given a genuine credits endpoint,
-set `nextproxy.profile_path` and that value is preferred.
+The lesson generalises: an unauthenticated probe measures the anonymous tier and
+says nothing about what a key unlocks.
 
-The brief mentioned "1,000 Free Starter Credits" and a developer console, and the
-anti-scraping block points at `developer.nextproxy.site`. **That domain does not
-resolve.** Treat any signup flow for it with suspicion, and never paste a key you
-use elsewhere.
+**Cost is per request, not per address.** Measured by watching
+`x-credits-remaining` across consecutive calls:
+
+| call | credits left | cost |
+| --- | --- | --- |
+| `/api/proxies?limit=1` | 949 → 948 → 947 → 946 | **1 per call** |
+| `/api/proxies?limit=5` | … | **1** |
+| `/api/random` | … | **1** |
+| `/api/ip` | … | **1** |
+| `/api/countries` | … | **1** |
+| `/api/health` | no credit headers at all | **free** |
+
+`limit=1` and `limit=100` cost the same, so requesting a bigger page is free
+money — do it. `/api/health` is the only genuinely free endpoint, which is why
+the storefront's availability check uses it and never the list route: a credit
+per page view would drain a fresh 1,000-credit key in about three days. The
+sampled admin probe does cost 1 credit, so it is cached for half an hour
+(`nextproxy.status_cache_seconds`) and refreshed on demand.
+
+A free key starts with **1,000 credits** — the brief's "1,000 Free Starter
+Credits" is real. `x-credits-used` tracked exactly the number of requests made.
+
+**There is still no credits *route*.** `/api/profile`, `/api/credits`, `/api/me`
+and `/api/account` all return 404 **even when authenticated**, so the balance has
+to come from response headers. `nextproxy.profile_path` stays empty.
+
+The anti-scraping block points at `developer.nextproxy.site` to "register a
+verified developer account". **That domain does not resolve.** Treat any signup
+flow for it with suspicion, and never paste a key you use elsewhere.
+
+### Masking
+
+The free tier **masks a share of every page**, returning rows like
+`185.68.•••.•••:••••`. Measured yield at `limit=25/50/100`: 71–80% of rows are
+usable, the rest are masked.
+
+This breaks two naive implementations, both of which were real bugs here:
+
+1. **Short pages are normal.** A full page yields fewer *usable* addresses than
+   were requested while 82,000 remain, so paging must compare the **raw** row
+   count against the page size, not the usable count. Comparing usable counts
+   stopped after page one and short-changed every multi-page order.
+2. **`page` is an offset window.** Requests return the same leading rows until
+   `page` advances, so it must be sent — and the **page size must stay constant**
+   across a walk, or "page 2" of a smaller size re-reads rows page 1 already
+   covered. Asking for 25 then 5 makes page 2 = rows 6–10.
+
+Both are covered by `tests/nextproxy-stub.php` (`mask_every`, page windowing) and
+asserted in `tests/http.sh`.
+
+### Tier
+
+A free `nex_live_…` key gives **the same 60 requests/minute as no key at all**
+(`Free Starter Tier` vs `Guest Community Tier`). What it adds is credit metering
+and a balance — not throughput, and not unmasked access. The provider sells a
+$5/mo Pro tier; whether that lifts masking or the rate limit was **not verified**
+here, and should be treated as unproven until someone tests it.
 
 ### What these proxies actually are
 

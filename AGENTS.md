@@ -72,5 +72,14 @@ This is **Digital Hub Shop**, a static-exported digital products marketplace
 - `POST /api/admin/nextproxy-key` writes through `lib/settings.php`, which only
   accepts keys in `SETTINGS_WRITABLE`. Never widen that list casually, and never
   return a stored secret unmasked.
-- The provider has no credits endpoint. Do not "fix" the admin console by
-  inventing one; read `server/api/DEVELOPER-NOTES.md` first.
+- The provider has no credits ROUTE, but it does send credit headers to
+  authenticated callers. Do not "fix" the console by inventing a balance, and do
+  not conclude credits are absent from an unauthenticated probe — that mistake
+  is in the git history.
+- Cost is per REQUEST (1 credit regardless of `limit`) and `/api/health` is
+  free. Never put a credit-spending call on a page-load path: availability is
+  `nextproxy_can_dispatch()` → cached health, and the sampled probe is admin-only
+  and cached for 30 minutes.
+- Paging must send `page` **and keep the page size constant**, and must compare
+  the RAW row count to the page size. The free tier masks ~25% of rows, so a
+  full page is legitimately short of usable addresses.

@@ -324,20 +324,25 @@ export default function AdminIntegrationsPage() {
               </div>
 
               {/*
-                The provider documents a credit balance and a developer console
-                to recharge it, but neither exists on the live service: its
-                profile routes 404 and the documented credit headers are never
-                sent. Say so rather than showing a fake number.
+                Credits are real, but only reported to authenticated callers and
+                only readable from response headers (there is no credits route).
+                Cost is per REQUEST, not per address — limit does not matter —
+                and /api/health is the one free endpoint.
               */}
               <p className="text-[10px] text-[var(--color-ink-faint)] leading-relaxed mb-3">
                 {proxy.status.credits_remaining != null
-                  ? `Credits came from ${
-                      proxy.status.credits_source === "profile"
-                        ? "your credits endpoint"
-                        : "the provider's response headers"
-                    }.`
-                  : "The provider has no credits endpoint — its /api/profile and /api/credits routes return 404 and the documented X-Credits-Remaining header is never sent, so \u201cRequests left\u201d above is the real allowance: a per-minute rate limit, not a spendable balance."}
+                  ? "Credits come from the provider's response headers — it has no credits route, so the balance is read from each authenticated request. One credit is charged per request that returns addresses, whatever the limit. The storefront's availability check uses the free /api/health endpoint and costs nothing."
+                  : "No key is set, so the provider reports no credit balance — it only tells authenticated callers. Without a key the pool still works, but it is rate-limited to 60 requests/minute and a share of every page comes back masked. Paste a key above to see the balance."}
               </p>
+
+              {proxy.credits_low && (
+                <p className="text-[11px] text-[var(--color-danger)] bg-[var(--color-danger)]/10 border border-[var(--color-danger)]/25 rounded-xl p-3 mb-3 leading-relaxed">
+                  Only {proxy.status.credits_remaining} credits left. Each order
+                  spends one credit per request, and once they run out the
+                  provider returns HTTP 402 and proxy orders fall through to a
+                  shortfall. Top up, or stock addresses by hand.
+                </p>
+              )}
 
               {proxy.status.sample.length > 0 && (
                 <div className="rounded-xl border border-[var(--color-line)] overflow-hidden mb-3">

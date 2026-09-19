@@ -18,7 +18,7 @@ into client JavaScript.
 | GET | `/api/orders/credentials?order_id&token` | Credentials for a paid order |
 | GET | `/api/orders/sms-status?order_id&token` | Live inbox feed for SMS numbers |
 | GET | `/api/admin/smsotp-status` | Provider balance + service list (admin key) |
-| GET | `/api/admin/nextproxy-status` | Proxy pool status + quota (admin key) |
+| GET | `/api/admin/nextproxy-status` | Proxy pool status + quota (admin key). `?refresh=1` costs 1 credit |
 | POST | `/api/admin/nextproxy-key` | Save/clear the proxy API key (admin key) |
 | POST | `/api/admin/inventory/add` | Bulk credential upload (admin key) |
 | GET | `/api/admin/inventory/list` | Per-product stock totals (admin key) |
@@ -119,12 +119,21 @@ as SMS:
 3. **Shortfall** — recorded for the admin, and the storefront shows Out of Stock.
 
 `GET /api/admin/nextproxy-status` reports reachability, the account tier, the
-pool size and sample addresses, plus the quota counters. About those counters:
-the provider documents an `X-Credits-Remaining` header and a developer console,
-but **neither exists** — `/api/profile` and `/api/credits` both 404 and the
-documented headers are never sent. Only `x-ratelimit-limit` / `-remaining` /
-`-reset` come back, so the console shows "Requests left" and reports
-`credits_remaining` as null rather than inventing a balance.
+pool size and sample addresses, plus the quota counters. Those counters are real
+but conditional:
+
+- `x-credits-remaining` / `x-credits-used` are sent **only to authenticated
+  callers**; anonymous requests get just `x-ratelimit-*`. An unauthenticated
+  probe therefore looks like "credits do not exist", which is how an earlier
+  version of this file got it wrong.
+- Cost is **per request, not per address** — 1 credit whether `limit` is 1 or
+  100 — and `/api/health` is free.
+- There is no credits **route**: `/api/profile` and `/api/credits` 404 even
+  authenticated, so the balance is read from response headers.
+
+The storefront's availability check deliberately uses the free health endpoint
+rather than the sampled probe, because that probe costs a credit and a credit per
+page view would drain a 1,000-credit key in roughly three days.
 
 `POST /api/admin/nextproxy-key` stores the key in `data/settings.json` (mode
 0600, allow-listed to that one setting) so the owner can paste it in the console
@@ -153,9 +162,9 @@ surfaced: the credentials are already on screen and in the ledger.
 ```bash
 npm run test:php              # everything
 npm run test:php:requires     # every call resolves through its require chain
-npm run test:php:unit         # 222 assertions: parsing, claiming, dispatch, HMAC
+npm run test:php:unit         # 232 assertions: parsing, claiming, dispatch, HMAC
 npm run test:php:concurrency  # 10 processes racing for 40 units
-npm run test:php:http         # 125 end-to-end HTTP assertions
+npm run test:php:http         # 133 end-to-end HTTP assertions
 ```
 
 `test:php:http` also starts `tests/smsotp-stub.php` and

@@ -499,6 +499,54 @@ eq(
 );
 
 /* ---------------------------------------------------------------- */
+section('Masked pages and paging bookkeeping');
+
+// The raw count is what tells paging apart from exhaustion. The live free tier
+// masks a share of every page, so the USABLE count is legitimately smaller than
+// the page size while thousands more addresses remain. Paging on the usable
+// count stopped after one page and short-changed every multi-page order.
+$raw = 0;
+$parsed = nextproxy_parse_proxies([
+    'proxies' => [
+        ['ip' => '1.2.3.4', 'port' => '8080'],
+        ['ip' => '5.6.7.8', 'port' => '8080'],
+    ],
+], $raw);
+eq(2, $raw, 'the raw row count is reported');
+eq(2, count($parsed), 'and both usable rows come through');
+
+$rawMasked = 0;
+$maskedParse = nextproxy_parse_proxies([
+    'proxies' => [
+        ['ip' => '1.2.3.4', 'port' => '8080'],
+        ['ip' => "185.68.\u{2022}\u{2022}\u{2022}.\u{2022}\u{2022}\u{2022}", 'port' => "\u{2022}\u{2022}\u{2022}\u{2022}", 'masked' => true],
+        ['ip' => '5.6.7.8', 'port' => '8080'],
+        ['ip' => "9.9.9.9", 'port' => "\u{2022}\u{2022}\u{2022}", 'masked' => true],
+    ],
+], $rawMasked);
+eq(4, $rawMasked, 'the raw count includes masked rows the provider sent');
+eq(2, count($maskedParse), 'masked rows are filtered out of the usable list');
+eq(
+    true,
+    $rawMasked > count($maskedParse),
+    'a masked page reports MORE raw rows than usable ones'
+);
+ok(
+    !array_filter($maskedParse, static fn ($a) => str_contains($a, "\u{2022}")),
+    'no masked address survives into the usable list'
+);
+eq(
+    [],
+    nextproxy_parse_proxies(['status' => 'success'], $emptyRaw),
+    'a body with no list yields nothing'
+);
+eq(0, $emptyRaw, 'and reports a raw count of zero');
+
+// The provider paginates, so the page must be part of the request.
+eq('/api/proxies', nextproxy_list_path([]), 'the list path stays the documented one');
+eq('/api/health', config_value([], 'nextproxy.health_path', '/api/health'), 'the free health path is the default');
+
+/* ---------------------------------------------------------------- */
 section('Proxy provider envelope handling');
 
 eq(

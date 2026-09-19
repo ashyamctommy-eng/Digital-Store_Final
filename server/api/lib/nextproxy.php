@@ -29,16 +29,23 @@
  *         "clientTier": "Guest Community Tier (60 req/min)"
  *       }
  *
- *   Quota: reported in headers, NOT in a body field and NOT at a profile
- *   endpoint. `/api/profile` and `/api/credits` both return 404, and the
- *   documented `X-Credits-Remaining` / `X-Credits-Used` headers do not appear
- *   in practice. What is actually sent is:
- *       x-ratelimit-limit: 60
- *       x-ratelimit-remaining: 48
- *       x-ratelimit-reset: <unix>
- *   So the "credits" the admin console shows come from those headers. If the
- *   account ever does expose a real credits endpoint, set
- *   `nextproxy.profile_path` and it is preferred.
+ *   Quota, measured against a live key:
+ *
+ *     - Signed requests DO get the documented credit headers:
+ *           x-credits-remaining: 955
+ *           x-credits-used: 45
+ *       They are simply ABSENT for unauthenticated requests, which is how an
+ *       earlier probe concluded — wrongly — that they were never sent.
+ *     - Every request that returns proxy data costs 1 credit, whatever the
+ *       limit: `limit=1` and `limit=100` both cost 1. Cost is per request.
+ *     - `/api/health` is FREE (no credit headers, works with or without a key),
+ *       which is why reachability checks use it rather than fetching addresses.
+ *     - Both rate-limit and credit headers also come back:
+ *           x-ratelimit-limit: 60
+ *           x-ratelimit-remaining: 48
+ *     - No credits/profile ROUTE exists. `/api/profile`, `/api/credits`,
+ *       `/api/me` and `/api/account` all 404 even when authenticated, so
+ *       `nextproxy.profile_path` stays empty and the headers are the source.
  *
  * The pool is a shared, publicly-listed collection of mirrored proxies, not a
  * private allocation. Latency is high (150-250ms), anonymity is "anonymous"
@@ -165,7 +172,7 @@ function nextproxy_batch_size(array $config): int
  * Looks at the documented top-level `proxies` array first, then at the
  * plausible wrappers other revisions use.
  */
-function nextproxy_parse_proxies(array $body): array
+function nextproxy_parse_proxies(array $body, ?int &$rawCount = null): array
 {
     $list = null;
 
@@ -180,8 +187,13 @@ function nextproxy_parse_proxies(array $body): array
     }
 
     if ($list === null) {
+        $rawCount = 0;
         return [];
     }
+
+    // How many rows the provider actually sent, before anything was filtered
+    // out. Paging needs this: see nextproxy_fetch().
+    $rawCount = count($list);
 
     $usable = [];
     foreach ($list as $entry) {
@@ -238,20 +250,26 @@ function nextproxy_meta_from_response(array $res): array
 /**
  * Performs one list request.
  *
- * @return array{ok:bool, proxies:array, meta:array, error:?string, http:int, status:?string}
+ * @return array{ok:bool, proxies:array, meta:array, error:?string, http:int, status:?string, raw_count:int}
  */
 function nextproxy_call(
     array $config,
     int $limit,
     string $countryCode = '',
     string $protocol = '',
-    ?string $path = null
+    ?string $path = null,
+    int $page = 1
 ): array {
     $limit = max(1, $limit);
     $query = [
         'format' => 'json',
         'limit' => $limit,
     ];
+    // The provider paginates: without an explicit page, every request returns
+    // the same leading rows, which makes a second page look like a duplicate.
+    if ($page > 1) {
+        $query['page'] = $page;
+    }
 
     $country = strtoupper(trim($countryCode));
     if ($country !== '' && $country !== 'ALL') {
@@ -289,6 +307,7 @@ function nextproxy_call(
             'error' => 'Could not reach the proxy provider: ' . $res['error'],
             'http' => 0,
             'status' => null,
+            'raw_count' => 0,
         ];
     }
 
@@ -301,6 +320,7 @@ function nextproxy_call(
             'error' => 'The proxy provider returned an unreadable response (HTTP ' . $res['status'] . ').',
             'http' => $res['status'],
             'status' => null,
+            'raw_count' => 0,
         ];
     }
 
@@ -316,11 +336,13 @@ function nextproxy_call(
             'error' => is_string($message) ? $message : 'The proxy provider rejected the request.',
             'http' => $res['status'],
             'status' => $status,
+            'raw_count' => 0,
         ];
     }
 
     $meta = nextproxy_meta_from_response($res);
-    $proxies = nextproxy_parse_proxies($body);
+    $rawCount = 0;
+    $proxies = nextproxy_parse_proxies($body, $rawCount);
 
     if (!$proxies) {
         return [
@@ -330,6 +352,7 @@ function nextproxy_call(
             'error' => 'The proxy provider returned no usable addresses.',
             'http' => $res['status'],
             'status' => $status,
+            'raw_count' => $rawCount,
         ];
     }
 
@@ -340,6 +363,7 @@ function nextproxy_call(
         'error' => null,
         'http' => $res['status'],
         'status' => $status,
+        'raw_count' => $rawCount,
     ];
 }
 
@@ -376,10 +400,20 @@ function nextproxy_fetch(array $config, int $qty, string $countryCode = '', stri
     $meta = [];
     $error = null;
     $http = 0;
+    $page = 1;
+    // Bounds the work: a page that yields nothing new (or the provider running
+    // out) ends the loop sooner, but a hostile response cannot spin forever.
+    $maxPages = max(1, (int) config_value($config, 'nextproxy.max_pages', 12));
 
-    while (count($collected) < $qty) {
-        $want = (int) min($batch, $qty - count($collected));
-        $res = nextproxy_call($config, $want, $countryCode, $protocol);
+    // The page size must stay CONSTANT for the whole walk. A page is an offset
+    // window, so shrinking it on later requests re-reads rows already seen:
+    // asking for 25 then 5 makes "page 2" rows 6-10, which page 1 already
+    // covered. That silently capped every order at one page.
+    $pageSize = max(1, min($batch, $qty));
+
+    while (count($collected) < $qty && $page <= $maxPages) {
+        $res = nextproxy_call($config, $pageSize, $countryCode, $protocol, null, $page);
+        $page++;
         $http = $res['http'];
         $meta = $res['meta'] ?: $meta;
 
@@ -401,8 +435,17 @@ function nextproxy_fetch(array $config, int $qty, string $countryCode = '', stri
             }
         }
 
-        // A full page that yielded nothing new means further paging would loop.
-        if ($added === 0 || count($res['proxies']) < $want) {
+        // Stop only when the PROVIDER had nothing more to give.
+        //
+        // Two traps here, both hit against the live service:
+        //   1. This provider MASKS a share of every page (rows arrive as
+        //      "185.68.•••.•••"), so a full page legitimately yields fewer
+        //      usable addresses than were asked for while 80,000 remain.
+        //      Comparing the usable count stopped paging after one page.
+        //   2. It paginates, so the same rows come back until `page` advances.
+        //      Without that, every extra request looked like a duplicate pool.
+        $rawCount = (int) ($res['raw_count'] ?? count($res['proxies']));
+        if ($added === 0 || $rawCount < $pageSize) {
             break;
         }
     }
@@ -422,9 +465,106 @@ function nextproxy_fetch(array $config, int $qty, string $countryCode = '', stri
         'proxies' => array_slice($collected, 0, $qty),
         'meta' => $meta,
         // A partial result is still usable; the caller reports the shortfall.
-        'error' => count($collected) < $qty ? ($error ?? 'The provider pool was smaller than requested.') : null,
+        'error' => count($collected) < $qty
+            ? ($error ?? 'The provider pool did not yield enough usable addresses.')
+            : null,
         'http' => $http,
     ];
+}
+
+/* -------------------------------------------------------------------------
+ * Reachability
+ * ---------------------------------------------------------------------- */
+
+/**
+ * Free liveness check.
+ *
+ * `/api/health` returns cluster status without handing over any addresses, so it
+ * costs no credits — unlike `/api/proxies`, which costs one credit per call
+ * whatever the limit. The storefront asks whether proxies are available on
+ * every page load, so that check has to be the free one; spending a credit per
+ * page view would drain a 1,000-credit key in days.
+ *
+ * @return array{ok:bool, nodes:?int, error:?string, checked:int}
+ */
+function nextproxy_health(array $config): array
+{
+    if (!nextproxy_is_configured($config)) {
+        return ['ok' => false, 'nodes' => null, 'error' => 'not_configured', 'checked' => 0];
+    }
+
+    $path = trim((string) config_value($config, 'nextproxy.health_path', '/api/health'));
+    if ($path === '') {
+        $path = '/api/health';
+    }
+
+    $res = http_json_request(
+        'GET',
+        nextproxy_base($config) . $path,
+        [],
+        null,
+        max(5, (int) config_value($config, 'nextproxy.timeout_seconds', 20))
+    );
+
+    if ($res['error'] !== null) {
+        return ['ok' => false, 'nodes' => null, 'error' => 'Could not reach the proxy provider: ' . $res['error'], 'checked' => time()];
+    }
+
+    $body = is_array($res['body']) ? $res['body'] : null;
+    $healthy = $res['status'] >= 200 && $res['status'] < 300
+        && $body !== null
+        && (!isset($body['status']) || in_array(strtolower((string) $body['status']), ['healthy', 'success', 'ok'], true));
+
+    return [
+        'ok' => $healthy,
+        'nodes' => isset($body['nodesOnline']) && is_numeric($body['nodesOnline'])
+            ? (int) $body['nodesOnline']
+            : null,
+        'error' => $healthy ? null : 'The proxy provider reported a problem (HTTP ' . $res['status'] . ').',
+        'checked' => time(),
+    ];
+}
+
+/** Cached free reachability check, used by the storefront. */
+function nextproxy_health_cached(array $config, ?int $ttlSeconds = null): array
+{
+    if ($ttlSeconds === null) {
+        $ttlSeconds = (int) config_value($config, 'nextproxy.health_cache_seconds', 600);
+    }
+
+    $path = store_data_dir($config) . '/nextproxy-health.json';
+
+    if ($ttlSeconds > 0 && is_file($path)) {
+        $raw = @file_get_contents($path);
+        $cached = $raw === false ? null : json_decode($raw, true);
+        if (is_array($cached) && isset($cached['at'], $cached['ok'])) {
+            if (time() - (int) $cached['at'] < $ttlSeconds) {
+                return [
+                    'ok' => (bool) $cached['ok'],
+                    'nodes' => isset($cached['nodes']) ? (int) $cached['nodes'] : null,
+                    'error' => $cached['error'] ?? null,
+                    'checked' => (int) $cached['at'],
+                    'cached' => true,
+                ];
+            }
+        }
+    }
+
+    $fresh = nextproxy_health($config);
+
+    $tmp = $path . '.tmp';
+    if (@file_put_contents($tmp, json_encode([
+        'at' => time(),
+        'ok' => $fresh['ok'],
+        'nodes' => $fresh['nodes'],
+        'error' => $fresh['error'],
+    ], JSON_UNESCAPED_SLASHES), LOCK_EX) !== false) {
+        @rename($tmp, $path);
+        @chmod($path, 0o640);
+    }
+
+    $fresh['cached'] = false;
+    return $fresh;
 }
 
 /* -------------------------------------------------------------------------
@@ -491,6 +631,10 @@ function nextproxy_profile(array $config): array
 
 /**
  * A one-request probe of the provider, for the admin console badge.
+ *
+ * Costs ONE credit per call (the sample fetch), so it is cached for
+ * `nextproxy.status_cache_seconds` and only refreshed on demand. Never call this
+ * from a page-load path — use nextproxy_health_cached() for availability.
  *
  * @return array{
  *   ok:bool, enabled:bool, reachable:bool, key_present:bool, key_masked:string,
@@ -573,7 +717,7 @@ function nextproxy_probe(array $config): array
 function nextproxy_status_cached(array $config, ?int $ttlSeconds = null): array
 {
     if ($ttlSeconds === null) {
-        $ttlSeconds = (int) config_value($config, 'nextproxy.status_cache_seconds', 300);
+        $ttlSeconds = (int) config_value($config, 'nextproxy.status_cache_seconds', 1800);
     }
 
     $path = store_data_dir($config) . '/nextproxy-status.json';
@@ -608,13 +752,15 @@ function nextproxy_status_cached(array $config, ?int $ttlSeconds = null): array
 /**
  * Whether on-demand proxy supply can currently deliver.
  *
- * The storefront uses this to decide between "On Demand" and "Out of Stock", so
- * it must reflect a provider that is actually answering.
+ * The storefront uses this to decide between "On Demand" and "Out of Stock" on
+ * every page load, so it deliberately uses the FREE health check rather than
+ * the sampled probe: that one costs a credit, and a credit per page view would
+ * empty a fresh key's balance within days.
  */
 function nextproxy_can_dispatch(array $config): bool
 {
     if (!nextproxy_is_configured($config)) {
         return false;
     }
-    return (bool) (nextproxy_status_cached($config)['ok'] ?? false);
+    return (bool) (nextproxy_health_cached($config)['ok'] ?? false);
 }

@@ -97,9 +97,19 @@ return [
         // Safety ceiling on the addresses a single order can buy.
         'max_per_order' => 500,
         'timeout_seconds' => 20,
-        // How long a probe of the provider is reused before re-checking.
-        'status_cache_seconds' => 300,
-        // How many sample addresses the admin console shows.
+        // --- Costs real credits. Read before changing. ---
+        // Verified against a live key: every request that returns addresses
+        // costs 1 credit whatever the limit (limit=1 and limit=100 both cost 1),
+        // while /api/health is free. A free key comes with 1,000 credits.
+        //
+        // The storefront's "is this available?" check therefore uses the FREE
+        // health endpoint, cached for health_cache_seconds. The sampled probe
+        // below costs 1 credit, so it is cached for half an hour and only
+        // refreshed when an admin asks for it.
+        'health_path' => '/api/health',
+        'health_cache_seconds' => 600,
+        'status_cache_seconds' => 1800,
+        // How many sample addresses the admin console shows (still 1 credit).
         'status_sample' => 3,
     ],
 

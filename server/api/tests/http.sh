@@ -108,7 +108,7 @@ cat > "$STUB_STATE" <<'JSON'
 JSON
 
 cat > "$NP_STUB_STATE" <<'JSON'
-{"pool":[],"pool_size":500,"call_count":0,"addresses_served":0,"mode":"ok","rate_limit":60,"rate_remaining":48,"tier":"Guest Community Tier (60 req/min)","send_credit_headers":false}
+{"pool":[],"pool_size":500,"call_count":0,"addresses_served":0,"mode":"ok","rate_limit":60,"rate_remaining":48,"tier":"Guest Community Tier (60 req/min)","mask_every":0,"send_credit_headers":true}
 JSON
 
 cat > "$CONFIG_FILE" <<PHPEOF
@@ -131,6 +131,8 @@ return [
         'auth_style' => 'header',
         'enabled' => true,
         'status_cache_seconds' => 0,
+        'health_path' => '/api/health',
+        'health_cache_seconds' => 0,
         'timeout_seconds' => 5,
     ],
 ];
@@ -542,6 +544,84 @@ check_absent "an unreachable provider is not offered on demand" '"proxy-mobile-0
 check_contains "SMS availability is unaffected by a proxy outage" '"sms-telegram"' "$(cat /tmp/dhs-r.json | sed 's/.*"dynamic"://')"
 
 np_stub_set mode ok
+
+echo
+echo -e "\033[1mProxy delivery: masked rows and pagination\033[0m"
+
+# The live free tier masks a share of every page ("185.68.•••.•••"), so a full
+# page yields FEWER usable addresses than were requested. Comparing the usable
+# count against the page size stopped paging after one page and short-changed
+# every multi-page order. This section is the regression guard for that.
+
+# Drain proxy-dc-03 so the provider must supply the next order.
+"$PHP_BIN" "$API_DIR/tests/seed.php" "$DATA_DIR" "proxy-dc-03" "ORDER_proxy-dc-03_1800000000050" "tok_drain_dc" 0 1 "draindc@example.test" >/dev/null
+fire_paid_ipn "ORDER_proxy-dc-03_1800000000050" >/dev/null
+sleep 0.8
+check_contains "proxy-dc-03 static stock is drained" '"proxy-dc-03":0' "$(curl -s "$BASE/inventory/counts")"
+
+# Now mask every 4th row, as the free tier does.
+np_stub_set mask_every 4
+PAGES_BEFORE=$(np_stub_get pages_requested)
+
+"$PHP_BIN" "$API_DIR/tests/seed.php" "$DATA_DIR" "proxy-dc-03" "ORDER_proxy-dc-03_1800000000060" "tok_masked" 0 1 "masked@example.test" >/dev/null
+fire_paid_ipn "ORDER_proxy-dc-03_1800000000060" >/dev/null
+sleep 1.2
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' \
+  "$BASE/orders/credentials?order_id=ORDER_proxy-dc-03_1800000000060&token=tok_masked")
+check "masked-page order credentials -> 200" "200" "$CODE"
+
+MASKED_COUNT=$("$PHP_BIN" -r '
+  $d = json_decode((string) file_get_contents($argv[1]), true);
+  echo $d["credentials"][0]["proxy_count"] ?? 0;' /tmp/dhs-r.json)
+check "a 25-IP order is still filled from masked pages" "25" "$MASKED_COUNT"
+
+# Not one delivered address may carry the mask character.
+MASK_LEAK=$("$PHP_BIN" -r '
+  $d = json_decode((string) file_get_contents($argv[1]), true);
+  $bad = 0;
+  foreach ($d["credentials"] ?? [] as $u) {
+    foreach ($u["proxies"] ?? [] as $p) {
+      if (str_contains($p, "\u{2022}") || !preg_match("/^\d+\.\d+\.\d+\.\d+:\d+$/", $p)) $bad++;
+    }
+  }
+  echo $bad;' /tmp/dhs-r.json)
+check "no masked or malformed address was delivered" "0" "$MASK_LEAK"
+
+# The mask character must not survive into the export either.
+EXPORT_LINES=$("$PHP_BIN" -r '
+  require $argv[2] . "/lib/http.php";
+  require $argv[2] . "/lib/store.php";
+  require $argv[2] . "/lib/dispatch.php";
+  $o = ["order_id" => "ORDER_proxy-dc-03_1800000000060", "items" => []];
+  $d = json_decode((string) file_get_contents($argv[1]), true);
+  $t = dispatch_render_text($o, $d["credentials"] ?? []);
+  echo str_contains($t, "\u{2022}") ? "leaked" : "clean";' /tmp/dhs-r.json "$API_DIR")
+check "the .txt export contains no masked address" "clean" "$EXPORT_LINES"
+
+# More than one page must have been requested, or the mask would have won.
+PAGES_AFTER=$(np_stub_get pages_requested)
+check "paging continued past the masked rows (${PAGES_BEFORE} -> ${PAGES_AFTER})" \
+  "yes" "$([ "$PAGES_AFTER" -gt "$((PAGES_BEFORE + 1))" ] && echo yes || echo no)"
+
+np_stub_set mask_every 0
+
+echo
+echo -e "\033[1mThe storefront availability check is free\033[0m"
+
+# A credit is charged per request that returns addresses, so the page-load check
+# must use the free /api/health endpoint. Spending a credit per page view would
+# drain a 1,000-credit key in days.
+CALLS_BEFORE=$(np_stub_get call_count)
+HEALTH_BEFORE=$(np_stub_get health_calls)
+for _ in 1 2 3 4 5; do curl -s -o /dev/null "$BASE/inventory/counts"; done
+CALLS_AFTER=$(np_stub_get call_count)
+HEALTH_AFTER=$(np_stub_get health_calls)
+
+check "five storefront stock checks cost no proxy credits (${CALLS_BEFORE} -> ${CALLS_AFTER})" \
+  "$CALLS_BEFORE" "$CALLS_AFTER"
+check "they used the free health endpoint instead (${HEALTH_BEFORE} -> ${HEALTH_AFTER})" \
+  "yes" "$([ "$HEALTH_AFTER" -gt "$HEALTH_BEFORE" ] && echo yes || echo no)"
 
 echo -e "\033[1mProxy stock upload (admin)\033[0m"
 

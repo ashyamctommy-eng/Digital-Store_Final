@@ -186,6 +186,11 @@ export interface NextProxyStatusResponse {
   credits_source: string | null;
   rate_limit_source: string | null;
   profile_configured: boolean;
+  /** True when the key's credit balance is running low. */
+  credits_low?: boolean;
+  credits_low_threshold?: number;
+  /** What refreshing the console just cost, in credits (0 when cached). */
+  probe_cost_credits?: number;
 }
 
 export interface NextProxyKeyResponse {

@@ -234,7 +234,14 @@ silently starts sourcing addresses from a third party.
 > shared, publicly-mirrored set of proxies, not dedicated residential or mobile
 > lines, and two of the catalog's proxy descriptions do not match what it
 > supplies. The notes also record where the provider's documentation and the
-> live behaviour disagree — including that its "credits" endpoint does not exist.
+> live behaviour disagree — including that a free key gives the same
+> 60 requests/minute as no key at all, and that the free tier masks a share of
+> every page (71–80% of rows are usable).
+>
+> Cost is **per request, not per address** (1 credit whatever the limit), and
+> `/api/health` is the only free endpoint — which is why the storefront's
+> availability check uses it. A free key comes with 1,000 credits, so spending
+> one per page view would empty it in about three days.
 
 ### Order history and credentials
 

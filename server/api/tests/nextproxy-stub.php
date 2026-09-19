@@ -12,7 +12,15 @@
  *           clientTier}
  *   Auth: X-API-Key header or ?key=; optional, but a wrong key fails with
  *         {"status":"error","code":401,"message":"Invalid API key provided."}
- *   Quota: reported in x-ratelimit-* headers (not a credits field).
+ *   Quota: x-ratelimit-* headers, plus x-credits-remaining / x-credits-used
+ *   when a key is supplied (the real service only sends those to authenticated
+ *   callers).
+ *
+ * It also models the two behaviours that actually broke the client:
+ *   - MASKING: a share of rows come back with the address replaced by "•",
+ *     exactly as the live free tier does.
+ *   - PAGINATION: `page` is an offset window, so a request must keep the same
+ *     `limit` across pages or it re-reads rows it has already seen.
  *
  * Behaviour is driven by a JSON state file (path in NEXTPROXY_STUB_STATE) so a
  * test can shrink the pool, reject the key, simulate an outage, and assert how
@@ -37,10 +45,19 @@ function stub_state(string $path): array
         'rate_limit' => 60,
         'rate_remaining' => 48,
         'tier' => 'Guest Community Tier (60 req/min)',
-        // Emit the documented-but-absent credit headers, to prove the client
-        // prefers them when a provider really sends them.
-        'send_credit_headers' => false,
+        // Mask every Nth row (0 = never), like the live free tier's
+        // "185.68.•••.•••" rows. The client must skip these and keep paging.
+        'mask_every' => 0,
+        // Page size the real service would return per request.
+        'page_size' => 100,
+        // Observability for the tests.
+        'last_page' => 0,
+        'health_calls' => 0,
+        'pages_requested' => 0,
         'credits_remaining' => 1000,
+        // Credit headers are sent only to authenticated callers, exactly as the
+        // live service does. Set false to model a provider that never sends them.
+        'send_credit_headers' => true,
         // The most recent key the client sent, so a test can prove the stored
         // key is actually transmitted rather than merely saved.
         'last_key' => '',
@@ -82,6 +99,24 @@ function stub_address(int $index): array
 $path = (string) parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
 $state = stub_state($statePath);
 
+// `/api/health` is deliberately free on the real service: no credit headers and
+// no addresses. It is what the storefront's availability check uses, so it must
+// not cost anything here either — the tests assert that.
+if ($path === '/api/health') {
+    if ($state['mode'] === 'outage') {
+        stub_out(['status' => 'unavailable'], 503);
+    }
+    $state['health_calls'] = ((int) ($state['health_calls'] ?? 0)) + 1;
+    stub_save($statePath, $state);
+    stub_out([
+        'status' => 'healthy',
+        'cluster' => 'NextProxy Anycast Edge',
+        'uptime' => '100.00% SLA',
+        'nodesOnline' => 82555,
+        'timestamp' => gmdate('c'),
+    ]);
+}
+
 // Only the list routes exist; anything else is a 404 like the real service.
 if ($path !== '/api/proxies' && $path !== '/api/list') {
     stub_out(['error' => 'Endpoint not found'], 404);
@@ -107,8 +142,16 @@ if ($state['mode'] === 'error') {
 
 $state['call_count']++;
 $limit = max(1, (int) ($_GET['limit'] ?? 100));
+$page = max(1, (int) ($_GET['page'] ?? 1));
 $country = strtoupper((string) ($_GET['country'] ?? ''));
 
+$state['call_count']++;
+$state['pages_requested']++;
+$state['last_page'] = $page;
+
+// A stable master pool, so `page` addresses a real offset window. The live
+// service behaves this way: page 2 returns different rows, but only if the
+// limit stays the same.
 $pool = is_array($state['pool']) && $state['pool'] ? $state['pool'] : null;
 if ($pool === null) {
     $size = max(0, (int) $state['pool_size']);
@@ -119,27 +162,21 @@ if ($pool === null) {
     }
 }
 
-// Serve from the front of the pool, and drop what was handed out so a second
-// call cannot return the same address — that is what makes the client's
-// deduplication and paging observable.
-$page = array_slice($pool, 0, $limit);
-$state['pool'] = array_slice($pool, count($page));
-$state['addresses_served'] += count($page);
-stub_save($statePath, $state);
+$offset = ($page - 1) * $limit;
+$window = array_slice($pool, $offset, $limit);
+$state['addresses_served'] += count($window);
 
-header('X-RateLimit-Limit: ' . (int) $state['rate_limit']);
-header('X-RateLimit-Remaining: ' . max(0, (int) $state['rate_remaining'] - $state['call_count']));
-header('X-RateLimit-Reset: ' . (time() + 60));
-if (!empty($state['send_credit_headers'])) {
-    header('X-Credits-Remaining: ' . (int) $state['credits_remaining']);
-    header('X-Credits-Used: ' . (int) ($state['call_count'] * 2));
-}
-
+$maskEvery = max(0, (int) $state['mask_every']);
 $proxies = [];
-foreach ($page as $entry) {
+foreach ($window as $index => $entry) {
+    $globalIndex = $offset + $index;
+    // The live free tier masks a share of every page rather than failing, so a
+    // full page can yield fewer usable addresses than were asked for.
+    $masked = $maskEvery > 0 && ($globalIndex + 1) % $maskEvery === 0;
+
     $proxies[] = [
-        'ip' => $entry['ip'],
-        'port' => $entry['port'],
+        'ip' => $masked ? '185.68.' . "\u{2022}\u{2022}\u{2022}" . '.' . "\u{2022}\u{2022}\u{2022}" : $entry['ip'],
+        'port' => $masked ? "\u{2022}\u{2022}\u{2022}\u{2022}" : $entry['port'],
         'type' => 'https',
         'protocol' => (string) ($_GET['type'] ?? 'https'),
         'country' => $entry['country'] ?? ($country !== '' ? $country : 'DE'),
@@ -148,17 +185,28 @@ foreach ($page as $entry) {
         'status' => 'active',
         'isProOnly' => false,
         'isLocked' => false,
-        'masked' => false,
+        'masked' => $masked,
     ];
+}
+
+stub_save($statePath, $state);
+
+header('X-RateLimit-Limit: ' . (int) $state['rate_limit']);
+header('X-RateLimit-Remaining: ' . max(0, (int) $state['rate_remaining'] - $state['call_count']));
+header('X-RateLimit-Reset: ' . (time() + 60));
+// The real service sends these only when a key is supplied.
+if ($key !== '' && !empty($state['send_credit_headers'])) {
+    header('X-Credits-Remaining: ' . max(0, (int) $state['credits_remaining'] - $state['call_count']));
+    header('X-Credits-Used: ' . $state['call_count']);
 }
 
 stub_out([
     'status' => 'success',
     'count' => count($proxies),
-    'total' => count($proxies),
-    'page' => 1,
+    'total' => count($pool),
+    'page' => $page,
     'limit' => $limit,
-    'totalPages' => 1,
+    'totalPages' => (int) ceil(count($pool) / max(1, $limit)),
     'proxies' => $proxies,
     'clientTier' => (string) $state['tier'],
 ]);
