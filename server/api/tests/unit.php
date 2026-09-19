@@ -22,6 +22,7 @@ require_once __DIR__ . '/../lib/catalog.php';
 require_once __DIR__ . '/../lib/smsotp.php';
 require_once __DIR__ . '/../lib/proxyaddr.php';
 require_once __DIR__ . '/../lib/proxycheck.php';
+require_once __DIR__ . '/../lib/settings.php';
 
 $GLOBALS['__pass'] = 0;
 $GLOBALS['__fail'] = 0;
@@ -743,6 +744,126 @@ ok(catalog_is_proxy('proxy-dc-03'), 'catalog_is_proxy recognises a proxy product
 ok(!catalog_is_proxy('sms-whatsapp'), 'and does not confuse the two kinds');
 eq(10, (int) catalog_proxy_spec('proxy-9p-10')['per_unit'], 'the per-unit address count comes from the catalog');
 
+/* ---------------------------------------------------------------- */
+section('Super-admin settings');
+
+eq('pk_live_', 'pk_live_', 'sanity');
+
+// Validation runs before anything is written, so a bad batch cannot half-apply.
+eq(null, settings_validate_value('palplus_key', ''), 'an empty Palplus key is allowed (it means "clear")');
+eq(null, settings_validate_value('palplus_key', 'pk_live_abc123'), 'a well-formed live key passes');
+eq(null, settings_validate_value('palplus_key', 'pk_test_abc123'), 'a well-formed test key passes');
+ok(settings_validate_value('palplus_key', 'abc123') !== null, 'a key with no prefix is rejected');
+ok(settings_validate_value('palplus_key', 'pk_live_') !== null, 'a truncated key is rejected');
+ok(settings_validate_value('palplus_key', ' sk_live_abc') !== null, 'a key of the wrong type is rejected');
+
+eq(null, settings_validate_value('https_url', ''), 'an empty URL is allowed');
+eq(null, settings_validate_value('https_url', 'https://shop.example'), 'an https URL passes');
+ok(settings_validate_value('https_url', 'http://shop.example') !== null, 'plain http is rejected — gateways refuse it');
+ok(settings_validate_value('https_url', 'shop.example') !== null, 'a bare hostname is rejected');
+ok(settings_validate_value('https_url', 'ftp://shop.example') !== null, 'a non-http scheme is rejected');
+
+eq(null, settings_validate_value('optional_http_url', ''), 'an empty optional URL is allowed');
+eq(null, settings_validate_value('optional_http_url', 'http://127.0.0.1:8080/echo'), 'the optional URL may be plain http for local testing');
+ok(settings_validate_value('optional_http_url', 'nonsense') !== null, 'but it must still be a URL');
+
+eq(null, settings_validate_value('positive_int', '10'), 'a positive integer passes');
+ok(settings_validate_value('positive_int', '0') !== null, 'zero is rejected where positive is required');
+ok(settings_validate_value('positive_int', 'abc') !== null, 'text is rejected where a number is required');
+eq(null, settings_validate_value('non_negative_int', '0'), 'zero is allowed for a non-negative integer');
+ok(settings_validate_value('non_negative_int', '-1') !== null, 'a negative amount is rejected');
+
+// Browsers send booleans and numbers as strings.
+eq(true, settings_normalize('bool', 'true'), 'the string "true" normalises to a boolean');
+eq(true, settings_normalize('bool', true), 'a real boolean stays a boolean');
+eq(false, settings_normalize('bool', 'false'), 'the string "false" normalises to false');
+eq(42, settings_normalize('number', '42'), 'a numeric string normalises to a number');
+eq('pk_live_abc', settings_normalize('secret', "  pk_live_abc\n"), 'a pasted key is trimmed — a stray newline looks like an outage');
+
+eq('pk_l••••••f3a9', settings_mask('pk_live_0000000000f3a9'), 'a long secret keeps its ends');
+eq('•••••', settings_mask('short'), 'a short secret is hidden entirely');
+eq('', settings_mask(''), 'nothing masks to nothing');
+
+$setConfig = ['data_dir' => $tmp . '/settings-unit'];
+@mkdir($setConfig['data_dir'], 0777, true);
+
+// Writing through the console, and falling back when cleared.
+$write = settings_save($setConfig, ['public_base_url' => 'https://console.example']);
+ok($write['ok'], 'a valid batch saves');
+eq('console', settings_source($setConfig, 'public_base_url'), 'and is attributed to the console');
+eq(
+    'https://console.example',
+    config_value($setConfig, 'public_base_url', 'fallback'),
+    'config_value prefers the console value'
+);
+
+$clear = settings_save($setConfig, ['public_base_url' => '']);
+ok($clear['ok'], 'an empty value clears rather than errors');
+eq([], $clear['saved'], 'and is reported as cleared, not saved');
+eq(
+    'fallback',
+    config_value($setConfig, 'public_base_url', 'fallback'),
+    'so the config.php value comes back into force'
+);
+
+// The console must not be able to rewrite its own authorisation, or move the
+// data directory out from under itself.
+$forbidden = settings_save($setConfig, ['admin_api_key' => 'pwned']);
+ok(!$forbidden['ok'], 'admin_api_key cannot be written from the console');
+ok(isset($forbidden['errors']['admin_api_key']), 'and is refused with a reason');
+$forbidden2 = settings_save($setConfig, ['data_dir' => '/tmp/elsewhere']);
+ok(!$forbidden2['ok'], 'data_dir cannot be written from the console');
+
+// A bad field rejects the whole batch: a half-applied save is worse than none.
+$mixed = settings_save($setConfig, [
+    'store_name' => 'Should Not Apply',
+    'palplus.api_key' => 'nonsense',
+]);
+ok(!$mixed['ok'], 'a batch with one bad field fails');
+eq([], $mixed['saved'], 'and saves nothing at all');
+ok(!isset(settings_saved($setConfig)['store_name']), 'so the valid field was not applied either');
+
+$good = settings_save($setConfig, ['palplus.api_key' => 'pk_test_abc123', 'mode' => 'live']);
+ok($good['ok'], 'a fully valid batch saves');
+eq(
+    ['palplus.api_key', 'mode'],
+    array_values(array_intersect($good['saved'], ['palplus.api_key', 'mode'])),
+    'and reports both keys'
+);
+ok(settings_validate_value('select', 'nonsense') === null, 'the select rule itself does not validate');
+$badSelect = settings_save($setConfig, ['mode' => 'nonsense']);
+ok(!$badSelect['ok'], 'but an out-of-range select value is refused');
+
+// Nothing secret is ever handed back to the browser.
+$state = settings_state($setConfig);
+$flat = json_encode($state);
+ok(!str_contains($flat, 'pk_test_abc123'), 'the state never contains a saved secret');
+$palplusField = null;
+foreach ($state as $group) {
+    if ($group['id'] !== 'palplus') {
+        continue;
+    }
+    foreach ($group['fields'] as $field) {
+        if ($field['key'] === 'palplus.api_key') {
+            $palplusField = $field;
+        }
+    }
+}
+ok($palplusField !== null, 'the palplus key appears in the state');
+eq(true, $palplusField['is_set'], 'reported as set');
+eq(true, $palplusField['is_secret'], 'flagged as a secret');
+eq('', $palplusField['value'], 'with an empty value');
+ok(str_contains($palplusField['masked'], '•'), 'and only a masked hint');
+eq('console', $palplusField['source'], 'and its source');
+
+$settingsFile = $setConfig['data_dir'] . '/settings.json';
+if (is_file($settingsFile)) {
+    eq('0600', substr(sprintf('%o', fileperms($settingsFile)), -4), 'the settings file is owner-only');
+} else {
+    ok(false, 'the settings file exists');
+}
+
+/* ---------------------------------------------------------------- */
 /* ---------------------------------------------------------------- */
 section('Summary');
 

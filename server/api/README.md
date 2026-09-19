@@ -18,6 +18,9 @@ into client JavaScript.
 | GET | `/api/orders/credentials?order_id&token` | Credentials for a paid order |
 | GET | `/api/orders/sms-status?order_id&token` | Live inbox feed for SMS numbers |
 | GET | `/api/admin/smsotp-status` | Provider balance + service list (admin key) |
+| GET | `/api/admin/settings` | Configurable settings + setup checklist (admin key) |
+| POST | `/api/admin/settings` | Save allow-listed settings (admin key) |
+| POST | `/api/admin/settings/test` | Check a credential against the live provider (admin key) |
 | POST | `/api/admin/proxies/check` | Test/rank pasted addresses (admin key) |
 | POST | `/api/admin/inventory/add` | Bulk credential upload (admin key) |
 | GET | `/api/admin/inventory/list` | Per-product stock totals (admin key) |
@@ -105,6 +108,24 @@ provider spec is. Fulfilment for those follows a fixed priority in
 `/api/inventory/counts` caches the provider balance for
 `smsotp.balance_cache_seconds` (default 120) because the storefront asks for
 counts on every page load; the authoritative check runs again at dispatch time.
+
+## Configuration
+
+`lib/settings.php` owns the schema for everything the console can change: labels,
+hints, validation rules and grouping. The console renders itself from that, so
+there is one definition rather than a PHP/TypeScript pair to drift apart.
+
+`config_value()` checks `data/settings.json` before `config.php`, which is why no
+gateway client had to change to pick these up. Clearing a value in the console
+falls back to `config.php` — that is the supported way to revert without editing
+files on the server.
+
+Two keys are not in the schema at all: `admin_api_key` (it authorises the
+console) and `data_dir` (moving it would move the file being read). Neither can
+be written through the API, by design.
+
+Writes are all-or-nothing: one invalid field rejects the batch, so a save cannot
+half-apply.
 
 ## Proxy stock
 

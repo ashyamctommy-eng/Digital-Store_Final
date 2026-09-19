@@ -77,6 +77,56 @@ function nowpayments_create_invoice(array $config, array $params): array
 }
 
 /** Fetches a payment by id, used to confirm an IPN out of band. */
+/**
+ * API reachability and key validity.
+ *
+ * `GET /status` is the documented liveness endpoint and needs no key; calling an
+ * authenticated endpoint as well is what actually proves the key works.
+ *
+ * @return array{ok:bool, message:?string, error:?string, http:int}
+ */
+function nowpayments_status(array $config): array
+{
+    if (!nowpayments_is_configured($config)) {
+        return ['ok' => false, 'message' => null, 'error' => 'No NOWPayments API key is set.', 'http' => 0];
+    }
+
+    $base = rtrim((string) config_value($config, 'nowpayments.api_base', 'https://api.nowpayments.io/v1'), '/');
+
+    $ping = http_json_request('GET', $base . '/status', [], null, 15);
+    if ($ping['error'] !== null) {
+        return ['ok' => false, 'message' => null, 'error' => 'Could not reach NOWPayments: ' . $ping['error'], 'http' => 0];
+    }
+
+    // An authenticated call is the real test: /status answers without a key.
+    $auth = http_json_request(
+        'GET',
+        $base . '/currencies',
+        ['x-api-key' => (string) config_value($config, 'nowpayments.api_key', '')],
+        null,
+        15
+    );
+
+    if ($auth['error'] !== null) {
+        return ['ok' => false, 'message' => null, 'error' => 'Could not reach NOWPayments: ' . $auth['error'], 'http' => 0];
+    }
+
+    if ($auth['status'] === 401 || $auth['status'] === 403) {
+        return ['ok' => false, 'message' => null, 'error' => 'NOWPayments rejected that API key.', 'http' => $auth['status']];
+    }
+
+    $message = is_array($ping['body']) ? ($ping['body']['message'] ?? null) : null;
+
+    return [
+        'ok' => $auth['status'] >= 200 && $auth['status'] < 300,
+        'message' => is_string($message) ? $message : null,
+        'error' => $auth['status'] >= 200 && $auth['status'] < 300
+            ? null
+            : 'NOWPayments answered with HTTP ' . $auth['status'] . '.',
+        'http' => $auth['status'],
+    ];
+}
+
 function nowpayments_get_payment(array $config, string $paymentId): ?array
 {
     $base = rtrim((string) config_value($config, 'nowpayments.api_base'), '/');

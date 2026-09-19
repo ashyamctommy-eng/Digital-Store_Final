@@ -76,3 +76,21 @@ This is **Digital Hub Shop**, a static-exported digital products marketplace
   keep the per-request cap.
 - The IP score is our own heuristic, not a reputation lookup. Do not describe it
   to customers as a fraud or abuse score.
+
+### Configuration and the console
+
+- `lib/settings.php` is the single schema for console-editable settings. The
+  console renders from it; add a field there, not in the UI.
+- `admin_api_key` and `data_dir` must NEVER become writable through the API.
+  They are deliberately absent from the schema, and `settings_save()` rejects
+  unknown keys. Do not add them.
+- Secrets must never be returned by an endpoint. `settings_state()` returns a
+  masked hint, `is_set` and the source. A saved key is not sent back.
+- `config_value()` reads `data/settings.json` first. It is memoised per request,
+  so after a write you must call `config_forget_overrides()` or the caller sees
+  the pre-save value. `settings_save()` does this already.
+- Writes are all-or-nothing by design. Keep it that way.
+- `scripts/deploy-branch.mjs` publishes `dist/` to a `deploy` branch. Its
+  credential file must stay OUTSIDE the staging directory — an earlier version
+  staged it and would have published the token. The script now refuses to push
+  if anything token-shaped is staged. Read DEPLOY.md before changing it.

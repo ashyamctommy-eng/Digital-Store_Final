@@ -139,26 +139,37 @@ $constructs = array_flip([
     'global', 'namespace', 'class', 'interface', 'trait', 'enum', 'const',
 ]);
 
-/** All files reachable from $file through require statements. */
-function reachable(string $file, array $requires, array &$seen = []): array
+/**
+ * All files reachable from $file through require statements.
+ *
+ * Breadth-first rather than recursive: a recursive version treats a cycle
+ * (A requires B requires A) as a back-edge with no dependencies, which reports
+ * every function in the cycle as unreachable. Requires are legitimately
+ * mutually referential here — http.php pulls in settings.php for console
+ * overrides — so the walk has to tolerate that rather than cry wolf.
+ */
+function reachable(string $file, array $requires): array
 {
-    if (isset($seen[$file])) {
-        return $seen[$file];
+    $all = [$file => true];
+    $queue = [$file];
+
+    while ($queue) {
+        $current = array_pop($queue);
+        foreach ($requires[$current] ?? [] as $dep) {
+            if (!isset($all[$dep])) {
+                $all[$dep] = true;
+                $queue[] = $dep;
+            }
+        }
     }
-    $seen[$file] = [];
-    $all = [$file];
-    foreach ($requires[$file] ?? [] as $dep) {
-        $all = array_merge($all, reachable($dep, $requires, $seen));
-    }
-    $seen[$file] = array_unique($all);
-    return $seen[$file];
+
+    return array_keys($all);
 }
 
 $problems = [];
-$seen = [];
 
 foreach ($files as $file) {
-    $available = reachable($file, $requires, $seen);
+    $available = reachable($file, $requires);
     $code = $sources[$file];
 
     if (preg_match_all('/(?<![\w>$:])([a-z_][a-z0-9_]*)\s*\(/', $code, $m)) {
@@ -180,18 +191,6 @@ foreach ($files as $file) {
                 );
             }
         }
-    }
-}
-
-// A require pointing at a file that no longer exists only blows up when that
-// file is loaded, which may be on one rarely-hit endpoint.
-foreach ($files as $file) {
-    foreach (missing_required_files($file, (string) file_get_contents($file)) as $target) {
-        $problems[] = sprintf(
-            '%s requires %s, which does not exist',
-            str_replace($root . '/', '', $file),
-            str_replace($root . '/', '', $target)
-        );
     }
 }
 

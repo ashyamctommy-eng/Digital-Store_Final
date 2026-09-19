@@ -16,7 +16,9 @@
     "test:php:http": "bash server/api/tests/http.sh",
     "verify": "npm run typecheck && npm run lint && npm run test:php && npm run build:cpanel",
     "sync:catalog": "node scripts/sync-catalog.mjs",
-    "test:php:requires": "php server/api/tests/requires.php"
+    "test:php:requires": "php server/api/tests/requires.php",
+    "deploy:branch": "node scripts/deploy-branch.mjs",
+    "deploy:branch:build": "npm run build:cpanel && node scripts/deploy-branch.mjs"
   },
   "dependencies": {
     "firebase": "^12.13.0",

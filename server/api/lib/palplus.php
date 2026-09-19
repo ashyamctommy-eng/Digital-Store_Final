@@ -36,6 +36,119 @@ function palplus_auth_header(array $config): string
 }
 
 /**
+ * Service wallet balance.
+ *
+ * Every STK push deducts its transaction fee from this wallet, and the request
+ * fails with `INSUFFICIENT_SERVICE_BALANCE` (402) when it cannot cover the fee.
+ * Without this the first symptom of an empty wallet is customers seeing failed
+ * payments, which is a miserable way to find out.
+ *
+ * Response headers are returned too: the API allows 60 requests/minute per key
+ * and reports the remaining window in `x-ratelimit-*`.
+ *
+ * @return array{ok:bool, balance:?float, currency:?string, error:?string, http:int, rate_limit:?int, rate_remaining:?int}
+ */
+function palplus_service_wallet(array $config): array
+{
+    if (!palplus_is_configured($config)) {
+        return [
+            'ok' => false, 'balance' => null, 'currency' => null, 'error' => 'No Palplus API key is set.',
+            'http' => 0, 'rate_limit' => null, 'rate_remaining' => null,
+        ];
+    }
+
+    $res = http_json_request(
+        'GET',
+        rtrim(palplus_base_url($config), '/') . '/wallets/service/balance',
+        ['Authorization' => palplus_auth_header($config)],
+        null,
+        20
+    );
+
+    $rate = [
+        'rate_limit' => isset($res['headers']['x-ratelimit-limit']) && is_numeric($res['headers']['x-ratelimit-limit'])
+            ? (int) $res['headers']['x-ratelimit-limit'] : null,
+        'rate_remaining' => isset($res['headers']['x-ratelimit-remaining']) && is_numeric($res['headers']['x-ratelimit-remaining'])
+            ? (int) $res['headers']['x-ratelimit-remaining'] : null,
+    ];
+
+    if ($res['error'] !== null) {
+        return array_merge($rate, [
+            'ok' => false, 'balance' => null, 'currency' => null,
+            'error' => 'Could not reach Palplus: ' . $res['error'], 'http' => 0,
+        ]);
+    }
+
+    $body = $res['body'];
+    if ($res['status'] < 200 || $res['status'] >= 300 || !is_array($body) || empty($body['success'])) {
+        $message = $body['error']['message'] ?? null;
+        return array_merge($rate, [
+            'ok' => false, 'balance' => null, 'currency' => null,
+            'error' => is_string($message)
+                ? $message
+                : 'Palplus rejected the request (HTTP ' . $res['status'] . ').',
+            'http' => $res['status'],
+        ]);
+    }
+
+    $data = is_array($body['data'] ?? null) ? $body['data'] : [];
+    $wallet = is_array($data['wallet'] ?? null) ? $data['wallet'] : $data;
+
+    $balance = $wallet['balance'] ?? $data['balance'] ?? null;
+    $currency = $wallet['currency'] ?? $data['currency'] ?? 'KES';
+
+    return array_merge($rate, [
+        // Null when the shape differs: better to say "could not read it" than
+        // to show a made-up balance.
+        'ok' => is_numeric($balance),
+        'balance' => is_numeric($balance) ? (float) $balance : null,
+        'currency' => is_string($currency) ? $currency : 'KES',
+        'error' => is_numeric($balance) ? null : 'Palplus answered, but the balance was not in the response.',
+        'http' => $res['status'],
+    ]);
+}
+
+/** Payment channels on the account, used to explain NO_DEFAULT_CHANNEL. */
+function palplus_channels(array $config): array
+{
+    if (!palplus_is_configured($config)) {
+        return [];
+    }
+
+    $res = http_json_request(
+        'GET',
+        rtrim(palplus_base_url($config), '/') . '/channels',
+        ['Authorization' => palplus_auth_header($config)],
+        null,
+        20
+    );
+
+    $body = $res['body'];
+    if ($res['error'] !== null || !is_array($body) || empty($body['success'])) {
+        return [];
+    }
+
+    $rows = $body['data']['channels'] ?? $body['data'] ?? [];
+    if (!is_array($rows) || !array_is_list($rows)) {
+        return [];
+    }
+
+    $out = [];
+    foreach ($rows as $row) {
+        if (is_array($row)) {
+            $out[] = [
+                'id' => (string) ($row['id'] ?? ''),
+                'name' => (string) ($row['name'] ?? ''),
+                'type' => (string) ($row['type'] ?? ''),
+                'shortcode' => (string) ($row['shortcode'] ?? ''),
+                'is_default' => (bool) ($row['isDefault'] ?? $row['is_default'] ?? false),
+            ];
+        }
+    }
+    return $out;
+}
+
+/**
  * Initiates an STK push.
  *
  * @return array{ok:bool, status:int, data:array|null, error:?string, errorCode:?string}

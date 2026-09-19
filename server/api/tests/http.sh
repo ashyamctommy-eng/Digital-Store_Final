@@ -584,6 +584,112 @@ check_contains "a loopback address is still refused for stock" '127.0.0.1:8080' 
 check_contains "and nothing was added" '"added":0' "$(cat /tmp/dhs-r.json)"
 
 echo
+echo
+echo -e "\033[1mSuper-admin configurations\033[0m"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/settings")
+check "GET /api/admin/settings without a key -> 401" "401" "$CODE"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' "$BASE/admin/settings" -H 'x-admin-key: test-admin-key')
+check "GET /api/admin/settings -> 200" "200" "$CODE"
+check_contains "returns grouped fields" '"id":"general"' "$(cat /tmp/dhs-r.json)"
+check_contains "includes the palplus group" '"id":"palplus"' "$(cat /tmp/dhs-r.json)"
+check_contains "includes a setup checklist" '"ready_for_payments"' "$(cat /tmp/dhs-r.json)"
+check_absent "never returns an API key value" 'pk_test_fake' "$(cat /tmp/dhs-r.json)"
+check_contains "says what is not editable here" '"admin_api_key"' "$(cat /tmp/dhs-r.json)"
+
+# A value saved from the console must be what the rest of the backend reads.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
+  -d '{"settings":{"max_kes_amount":12345}}')
+check "POST /api/admin/settings -> 200" "200" "$CODE"
+check_contains "reports what it saved" '"max_kes_amount"' "$(cat /tmp/dhs-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' "$BASE/admin/settings" -H 'x-admin-key: test-admin-key')
+check_contains "the saved value comes back" '"value":"12345"' "$(cat /tmp/dhs-r.json)"
+check_contains "and is attributed to the console" '"source":"console"' "$(cat /tmp/dhs-r.json)"
+
+# The point of the panel: a value set here must take effect across the running
+# app without anyone editing files on the server. public_base_url is reported by
+# config-status, so it proves the whole chain rather than just the write.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
+  -d '{"settings":{"public_base_url":"https://from-console.test"}}')
+check "saving a setting from the console -> 200" "200" "$CODE"
+check_contains "the running config picked it up immediately" \
+  '"public_base_url":"https://from-console.test"' "$(curl -s "$BASE/config-status")"
+
+# Clearing it falls back to config.php, which is how a value is removed.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
+  -d '{"settings":{"public_base_url":""}}')
+check "clearing it falls back to config.php" "200" "$CODE"
+check_contains "the config.php value is back in force" \
+  '"public_base_url":"https://example.test"' "$(curl -s "$BASE/config-status")"
+
+# Validation: the whole batch is rejected, so a save can never half-apply.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
+  -d '{"settings":{"palplus.api_key":"not-a-palplus-key","store_name":"Should Not Apply"}}')
+check "an invalid key is rejected" "422" "$CODE"
+check_contains "with a field-level message" 'fieldErrors' "$(cat /tmp/dhs-r.json)"
+check_contains "explaining the expected shape" 'pk_live_' "$(cat /tmp/dhs-r.json)"
+check_contains "and nothing from the batch was saved" '"saved"' "$(curl -s -X POST "$BASE/admin/settings" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' -d '{"settings":{"store_name":"ok"}}')"
+case "$(cat "$DATA_DIR/settings.json" 2>/dev/null)" in
+  *"Should Not Apply"*) check "the valid field in a bad batch was not applied" "not_applied" "applied" ;;
+  *) check "the valid field in a bad batch was not applied" "not_applied" "not_applied" ;;
+esac
+
+# https is required for callback URLs, because gateways refuse anything else.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
+  -d '{"settings":{"public_base_url":"http://insecure.test"}}')
+check "a non-HTTPS public URL is rejected" "422" "$CODE"
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
+  -d '{"settings":{"public_base_url":"https://example.test"}}')
+check "an HTTPS URL is accepted" "200" "$CODE"
+
+# Settings that would let the console rewrite its own authorisation, or move the
+# data directory, are not reachable through it at all.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
+  -d '{"settings":{"admin_api_key":"pwned"}}')
+check "admin_api_key cannot be written here" "422" "$CODE"
+check_absent "and was not stored" 'pwned' "$(cat "$DATA_DIR/settings.json" 2>/dev/null)"
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
+  -d '{"settings":{"data_dir":"/tmp/elsewhere"}}')
+check "data_dir cannot be written here either" "422" "$CODE"
+
+check "the settings file is owner-only" "600" "$(stat -c '%a' "$DATA_DIR/settings.json")"
+
+echo
+echo -e "\033[1mIntegration test button\033[0m"
+
+CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/admin/settings/test" \
+  -H 'Content-Type: application/json' -d '{"integration":"palplus"}')
+check "test endpoint without an admin key -> 401" "401" "$CODE"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings/test" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' -d '{"integration":"nope"}')
+check "an unknown integration is refused" "422" "$CODE"
+
+# The SMS provider is stubbed, so its test should genuinely pass end to end.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings/test" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' -d '{"integration":"smsotp"}')
+check "testing the SMS provider -> 200" "200" "$CODE"
+check_contains "reports the key is accepted" 'API key is accepted' "$(cat /tmp/dhs-r.json)"
+check_contains "and shows the balance" 'Balance can cover the minimum' "$(cat /tmp/dhs-r.json)"
+
+# An integration with no key must say so rather than fail obscurely.
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/settings/test" \
+  -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' -d '{"integration":"nowpayments"}')
+check "testing an unconfigured gateway -> 200" "200" "$CODE"
+check_contains "explains that the key is missing" 'No NOWPayments API key is set' "$(cat /tmp/dhs-r.json)"
+
+echo
 echo -e "\033[1mSummary\033[0m"
 echo "  $PASS passed, $FAIL failed"
 echo

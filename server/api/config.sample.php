@@ -10,9 +10,29 @@
  * `config.php` is git-ignored and blocked from HTTP access by .htaccess.
  */
 
+/**
+ * BOOTSTRAP CONFIGURATION ONLY.
+ *
+ * Most settings — every gateway key, email, provider limits — are managed in the
+ * super-admin console under **Configurations**, and stored in
+ * `api/data/settings.json`. Values saved there take precedence over this file,
+ * so you only need to edit this file by hand for the two things the console
+ * deliberately will not touch:
+ *
+ *   admin_api_key   the credential that authorises the console. Making it
+ *                   editable from inside the console would mean a bad save locks
+ *                   you out of the only tool that could fix it.
+ *   data_dir        where the ledger and settings live. Moving it from the
+ *                   console would move the file the console is reading.
+ *
+ * Everything else below is a default or a fallback. Once the console has a
+ * value, it wins, and clearing it in the console falls back to whatever is here.
+ */
+
 return [
     // ---------------------------------------------------------------
     // Environment: 'sandbox' or 'live'
+    // Console equivalent: General → Environment
     // ---------------------------------------------------------------
     'mode' => 'sandbox',
 
@@ -126,10 +146,13 @@ return [
 
     // Public HTTPS base URL of this site, used for callback URLs.
     // Palplus rejects localhost and private addresses.
+    // Console equivalent: General → Public site URL
     'public_base_url' => 'https://your-domain.example',
 
-    // Where the order ledger is written. Keep it outside the web root if your
-    // host allows it; otherwise the bundled .htaccess blocks HTTP access.
+    // Where the order ledger, stock queue and console settings are written.
+    // NOT editable from the console: moving it would move the file the console
+    // is reading. Keep it outside the web root if your host allows it; otherwise
+    // the bundled .htaccess blocks HTTP access.
     'data_dir' => __DIR__ . '/data',
 
     // Refuse to start a payment if a matching order was never recorded.

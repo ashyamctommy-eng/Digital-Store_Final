@@ -14,6 +14,7 @@ const navItems: { href: string; label: string; icon: IconName }[] = [
   { href: "/admin/products/", label: "Products", icon: "cart" },
   { href: "/admin/inventory/", label: "Stock & Credentials", icon: "grid" },
   { href: "/admin/users/", label: "Customers", icon: "user" },
+  { href: "/admin/configurations/", label: "Configurations", icon: "filter" },
   { href: "/admin/integrations/", label: "Integrations", icon: "globe" },
   { href: "/admin/settings/", label: "Store Settings", icon: "filter" },
 ];

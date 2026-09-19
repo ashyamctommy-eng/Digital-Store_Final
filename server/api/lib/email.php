@@ -79,6 +79,71 @@ function email_credentials_html(array $config, array $order, array $deliverables
  *
  * @return array{ok:bool, status:int, error:?string}
  */
+/**
+ * Verifies the Resend key and the sending domain.
+ *
+ * A key that works but a domain that is not verified is the classic silent
+ * failure: Resend accepts the request and nothing is ever delivered. Checking
+ * the domain list turns that into a message the owner can act on.
+ *
+ * @return array{ok:bool, domains:array, from_domain:?string, domain_verified:?bool, error:?string}
+ */
+function email_check(array $config): array
+{
+    $key = trim((string) config_value($config, 'resend.api_key', ''));
+    if ($key === '') {
+        return ['ok' => false, 'domains' => [], 'from_domain' => null, 'domain_verified' => null, 'error' => 'No Resend API key is set.'];
+    }
+
+    $from = (string) config_value($config, 'resend.from', '');
+    $fromDomain = null;
+    if (preg_match('/@([A-Za-z0-9.-]+)/', $from, $m) === 1) {
+        $fromDomain = strtolower($m[1]);
+    }
+
+    $res = http_json_request('GET', 'https://api.resend.com/domains', ['Authorization' => 'Bearer ' . $key], null, 20);
+    if ($res['error'] !== null) {
+        return ['ok' => false, 'domains' => [], 'from_domain' => $fromDomain, 'domain_verified' => null, 'error' => 'Could not reach Resend: ' . $res['error']];
+    }
+    if ($res['status'] === 401 || $res['status'] === 403) {
+        return ['ok' => false, 'domains' => [], 'from_domain' => $fromDomain, 'domain_verified' => null, 'error' => 'Resend rejected that API key.'];
+    }
+
+    $body = is_array($res['body']) ? $res['body'] : [];
+    $rows = is_array($body['data'] ?? null) ? $body['data'] : [];
+    $domains = [];
+    $verified = null;
+
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $name = strtolower((string) ($row['name'] ?? ''));
+        $status = strtolower((string) ($row['status'] ?? ''));
+        $domains[] = ['name' => $name, 'status' => $status];
+        if ($fromDomain !== null && $name === $fromDomain) {
+            $verified = $status === 'verified';
+        }
+    }
+
+    $error = null;
+    if ($fromDomain === null) {
+        $error = 'The From address has no domain in it.';
+    } elseif ($verified === null) {
+        $error = 'The From domain (' . $fromDomain . ') is not on this Resend account.';
+    } elseif ($verified === false) {
+        $error = 'The From domain (' . $fromDomain . ') is not verified yet, so emails will not be delivered.';
+    }
+
+    return [
+        'ok' => $error === null,
+        'domains' => $domains,
+        'from_domain' => $fromDomain,
+        'domain_verified' => $verified,
+        'error' => $error,
+    ];
+}
+
 function email_send_credentials(array $config, array $order, array $deliverables): array
 {
     if (!email_is_configured($config)) {

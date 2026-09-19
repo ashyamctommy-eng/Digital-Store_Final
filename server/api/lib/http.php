@@ -49,8 +49,75 @@ function load_config(): array
     return $config;
 }
 
+/**
+ * Values saved from the super-admin console.
+ *
+ * Read straight off disk here rather than through lib/settings.php, because
+ * config_value() is the lowest-level reader in the codebase and settings.php
+ * itself calls it. Going the other way would be a cycle.
+ *
+ * Only allow-listed keys can ever appear in this file — settings_save() rejects
+ * everything else — so an unconditional override is safe.
+ */
+function config_console_overrides(array $config): array
+{
+    static $cache = null;
+    static $generation = -1;
+
+    $current = (int) ($GLOBALS['__config_overrides_generation'] ?? 0);
+    if ($generation !== $current) {
+        $cache = null;
+        $generation = $current;
+    }
+
+    if ($cache !== null) {
+        return $cache;
+    }
+
+    $dir = $config['data_dir'] ?? (__DIR__ . '/../data');
+    $dir = is_string($dir) && $dir !== '' ? $dir : (__DIR__ . '/../data');
+    $path = rtrim($dir, '/') . '/settings.json';
+
+    if (!is_file($path)) {
+        return $cache = [];
+    }
+    $raw = @file_get_contents($path);
+    if ($raw === false) {
+        return $cache = [];
+    }
+    $decoded = json_decode($raw, true);
+    return $cache = is_array($decoded) ? $decoded : [];
+}
+
+/**
+ * Drops the cached console overrides.
+ *
+ * config_console_overrides() memoises per request, which is right for reads and
+ * wrong after a write: without this, saving a setting and then reading it back
+ * in the same request (exactly what the settings endpoint does) would return the
+ * value from before the save.
+ */
+function config_forget_overrides(): void
+{
+    // Bumping the generation is what the reader compares against; the old cache
+    // is dropped the next time it runs.
+    $GLOBALS['__config_overrides_generation'] = (int) ($GLOBALS['__config_overrides_generation'] ?? 0) + 1;
+}
+
+/**
+ * Reads a configuration value.
+ *
+ * Values saved from the super-admin console take precedence over config.php, so
+ * a key pasted into the panel works immediately without editing files on the
+ * server. Everything else falls through to config.php exactly as before.
+ */
 function config_value(array $config, string $path, $default = null)
 {
+    $saved = config_console_overrides($config);
+    if (array_key_exists($path, $saved) && $saved[$path] !== '' && $saved[$path] !== null) {
+        return $saved[$path];
+    }
+
     $node = $config;
     foreach (explode('.', $path) as $segment) {
         if (!is_array($node) || !array_key_exists($segment, $node)) {

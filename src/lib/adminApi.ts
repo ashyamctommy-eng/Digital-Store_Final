@@ -147,6 +147,87 @@ export function adminDeleteUnit(
   });
 }
 
+/* ------------------------------- settings -------------------------------- */
+
+/** One configurable key, as the server describes it. */
+export interface SettingField {
+  key: string;
+  label: string;
+  type: "text" | "secret" | "url" | "number" | "bool" | "select";
+  hint: string | null;
+  placeholder: string | null;
+  options: string[] | null;
+  advanced: boolean;
+  required: boolean;
+  is_secret: boolean;
+  is_set: boolean;
+  /** "console" | "config" | "unset" — where the value in force came from. */
+  source: "console" | "config" | "unset";
+  /** Present for non-secrets only. Secrets are never sent back. */
+  value: string | boolean;
+  /** A masked hint for secrets, e.g. "pk_l…f3a9". */
+  masked: string;
+}
+
+export interface SettingGroup {
+  id: string;
+  label: string;
+  blurb: string;
+  fields: SettingField[];
+}
+
+export interface SetupCheck {
+  id: string;
+  label: string;
+  done: boolean;
+  detail: string;
+  blocking: boolean;
+}
+
+export interface SettingsResponse {
+  groups: SettingGroup[];
+  checklist: { items: SetupCheck[]; ready_for_payments: boolean; blocking: string[] };
+  mode: string;
+  not_editable_here: string[];
+}
+
+/** The whole console-editable configuration, secrets masked. */
+export function adminGetSettings(): Promise<ApiResult<SettingsResponse>> {
+  return adminFetch("/admin/settings", { method: "GET" });
+}
+
+/**
+ * Saves a batch of settings.
+ *
+ * The server rejects the whole batch if any field fails validation, so a save
+ * can never half-apply.
+ */
+export function adminSaveSettings(
+  settings: Record<string, string | boolean>
+): Promise<ApiResult<{ saved: string[]; cleared: string[]; groups: SettingGroup[]; checklist: SettingsResponse["checklist"] }>> {
+  return adminFetch("/admin/settings", {
+    method: "POST",
+    body: JSON.stringify({ settings }),
+  });
+}
+
+export interface IntegrationTestResult {
+  integration: string;
+  checks: { label: string; ok: boolean; detail: string | null }[];
+  ok: boolean;
+  error: string | null;
+}
+
+/** Asks the live provider whether a credential actually works. */
+export function adminTestIntegration(
+  integration: "palplus" | "nowpayments" | "resend" | "smsotp" | "proxycheck"
+): Promise<ApiResult<IntegrationTestResult>> {
+  return adminFetch("/admin/settings/test", {
+    method: "POST",
+    body: JSON.stringify({ integration }),
+  });
+}
+
 /* ------------------------------ proxy checker ---------------------------- */
 
 /** Grade and rank proxies before they are sold. Admin key required. */
