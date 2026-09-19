@@ -5,6 +5,7 @@ import { useCart } from "@/context/CartContext";
 import { getCategory } from "@/lib/categories";
 import { discountPercent, stockLabel } from "@/lib/format";
 import { useCurrency } from "@/context/CurrencyContext";
+import { useStock } from "@/context/StockContext";
 import { asset } from "@/lib/asset";
 import type { Product } from "@/lib/products";
 import Icon from "./ui/Icon";
@@ -13,12 +14,15 @@ import { useState } from "react";
 export default function ProductCard({ product }: { product: Product }) {
   const { addToCart } = useCart();
   const { format } = useCurrency();
+  const { stockFor } = useStock();
   const [justAdded, setJustAdded] = useState(false);
 
   const category = getCategory(product.category);
   const off = discountPercent(product.price_usd, product.original_price_usd);
-  const stock = stockLabel(product.stock);
-  const soldOut = product.stock <= 0;
+  // Live count when the admin has stocked this product, catalog number otherwise.
+  const liveStock = stockFor(product);
+  const stock = stockLabel(liveStock);
+  const soldOut = liveStock <= 0;
 
   const handleAdd = (e: React.MouseEvent) => {
     e.preventDefault();

@@ -8,6 +8,7 @@ import {
   isValidMpesaPhone,
   normalizeMpesaPhone,
   pollUntilSettled,
+  type OrderLine,
   type OrderStatus,
 } from "@/lib/payments";
 
@@ -18,9 +19,13 @@ interface PalplusModalProps {
   /** 12-character M-Pesa account reference. */
   accountReference: string;
   amountKes: number;
+  /** Cart lines, so the server can claim stock once the payment settles. */
+  items: OrderLine[];
+  /** Where the credentials email is sent. */
+  buyerEmail: string;
   /** Pre-fills the phone field (usually the WhatsApp number on the order). */
   defaultPhone?: string;
-  onPaid: (info: { reference?: string }) => void;
+  onPaid: (info: { reference?: string; token?: string }) => void;
 }
 
 type Phase = "form" | "awaiting" | "success" | "failed";
@@ -44,6 +49,8 @@ export default function PalplusModal({
   orderId,
   accountReference,
   amountKes,
+  items,
+  buyerEmail,
   defaultPhone = "",
   onPaid,
 }: PalplusModalProps) {
@@ -54,6 +61,7 @@ export default function PalplusModal({
   const [status, setStatus] = useState<OrderStatus>("pending");
   const [error, setError] = useState("");
   const [attempts, setAttempts] = useState(0);
+  const [orderToken, setOrderToken] = useState("");
   const abortRef = useRef<AbortController | null>(null);
   const settledRef = useRef(false);
 
@@ -79,6 +87,8 @@ export default function PalplusModal({
       accountReference,
       amountKes,
       phone: normalized,
+      items,
+      buyerEmail,
       // Palplus caps this at 13 characters.
       transactionDesc: "Order payment",
     });
@@ -88,6 +98,8 @@ export default function PalplusModal({
       setError(res.error ?? "Could not start the M-Pesa request.");
       return;
     }
+
+    if (res.data?.order_token) setOrderToken(res.data.order_token);
 
     const startedStatus = res.data?.status ?? "pending";
     if (startedStatus !== "pending" && startedStatus !== "unknown") {
@@ -110,7 +122,7 @@ export default function PalplusModal({
     if (final.status === "paid") {
       if (!settledRef.current) {
         settledRef.current = true;
-        onPaid({ reference: final.reference });
+        onPaid({ reference: final.reference, token: orderToken });
       }
       setPhase("success");
     } else {

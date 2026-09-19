@@ -14,6 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/http.php';
 require_once __DIR__ . '/../lib/store.php';
 require_once __DIR__ . '/../lib/nowpayments.php';
+require_once __DIR__ . '/../lib/dispatch.php';
 
 $config = load_config();
 apply_cors($config);
@@ -34,6 +35,9 @@ $priceUsd = round((float) ($body['priceUsd'] ?? 0), 2);
 $description = clean_str($body['description'] ?? 'Digital goods order', 200);
 $successUrl = clean_str($body['successUrl'] ?? '', 300);
 $cancelUrl = clean_str($body['cancelUrl'] ?? '', 300);
+// Cart lines, used later to claim stock.
+$items = dispatch_normalise_items($body['items'] ?? []);
+$buyerEmail = clean_str($body['buyerEmail'] ?? '', 190);
 
 if ($orderId === '') {
     json_error('orderId is required.', 422, 'MISSING_ORDER_ID');
@@ -45,6 +49,9 @@ if ($priceUsd <= 0) {
 $existing = store_read_order($config, $orderId);
 $order = array_merge($existing ?? [], [
     'order_id' => $orderId,
+    'order_token' => (string) ($existing['order_token'] ?? new_order_token()),
+    'items' => $items,
+    'buyer_email' => $buyerEmail !== '' ? $buyerEmail : ($existing['buyer_email'] ?? null),
     'gateway' => 'nowpayments',
     'amount_usd' => $priceUsd,
     'currency' => 'USD',
@@ -87,6 +94,7 @@ store_update_order($config, $orderId, [
 
 json_ok([
     'order_id' => $orderId,
+    'order_token' => (string) (store_read_order($config, $orderId)['order_token'] ?? ''),
     'invoice_id' => (string) ($invoice['id'] ?? ''),
     'invoice_url' => (string) ($invoice['invoice_url'] ?? ''),
     'status' => 'pending',

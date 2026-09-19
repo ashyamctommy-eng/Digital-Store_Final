@@ -17,6 +17,9 @@ npm run dev            # http://localhost:3000
 npm run typecheck      # tsc --noEmit
 npm run lint
 npm run build:cpanel   # production bundle -> ./dist  (site + PHP API + .htaccess)
+
+npm run test:php       # backend tests (needs a PHP CLI on PATH, 8.2+)
+npm run verify         # typecheck + lint + backend tests + cPanel build
 ```
 
 ---
@@ -141,7 +144,51 @@ you test the endpoints from a browser console.
 
 ---
 
-## 4. Architecture
+## 4. Fulfilment
+
+### Stock
+
+Each product has an `inventory_stock` queue (`server/api/lib/inventory.php`,
+one JSON file per product). The admin pastes credentials in bulk at
+**Admin → Stock & Credentials**; each line becomes one `available` unit and the
+public stock count becomes `COUNT(available)`.
+
+A product with **no uploaded rows keeps its catalog number**, so turning
+inventory on can never accidentally empty the shop.
+
+### Automatic dispatch
+
+When a Palplus or NOWPayments webhook confirms payment:
+
+1. the order is marked paid and the webhook gets its 2xx immediately;
+2. `dispatch_order()` claims exactly the quantity purchased, marks those units
+   `sold` and binds them to the order id;
+3. the credentials appear on the confirmation screen and in Order History;
+4. a copy is emailed to the buyer via Resend.
+
+Dispatch is **idempotent** — a duplicate webhook returns the same units instead
+of claiming more. If stock runs short the buyer receives what exists and the
+shortfall is recorded for the admin.
+
+Wallet and WhatsApp orders are **not** auto-fulfilled: the wallet has no
+server-side ledger, so those are delivered manually and the confirmation says so.
+
+### Order history and credentials
+
+`/account/orders` lists orders from a local index (`dhs.orders.v1`), merged with
+Firestore for signed-in customers. The Order Details modal shows the purchased
+items, usage warnings, and a `UID | Account Data | Copy` credential table, with
+Copy-all and a `.txt` export.
+
+Credentials are read through
+`GET /api/orders/credentials?order_id=…&token=…`. Every order carries a random
+`order_token` issued at checkout and stored only in the buyer's browser, so a
+leaked order id does not expose credentials.
+
+> **Note:** deleting an order removes it from the local list only. The buyer's
+> email copy and the server-side records are untouched.
+
+## 5. Architecture
 
 | Concern | Where |
 | --- | --- |
@@ -154,6 +201,12 @@ you test the endpoints from a browser console.
 | Cart / Wallet / Theme / Catalog / Currency | `src/context/` |
 | Browser persistence (`useSyncExternalStore`) | `src/lib/browserStore.ts` |
 | Payment API (PHP) | `server/api/` |
+| Inventory queue & dispatch | `server/api/lib/inventory.php`, `dispatch.php` |
+| Credentials email (Resend) | `server/api/lib/email.php` |
+| Order History + details modal | `src/app/account/orders/`, `src/components/OrderDetailsModal.tsx` |
+| Admin stock console | `src/app/admin/inventory/` |
+| Local order index | `src/lib/orderStore.ts` |
+| Live stock overlay | `src/context/StockContext.tsx` |
 | Apache config | `deploy/cpanel/.htaccess` |
 | Bundle builder | `scripts/build-cpanel.mjs` |
 
@@ -168,7 +221,7 @@ use `basePath = ""`; GitHub Pages sets `NEXT_PUBLIC_BASE_PATH=/<repo>`.
 
 ---
 
-## 5. Deployment targets
+## 6. Deployment targets
 
 | Target | Command | basePath |
 | --- | --- | --- |
@@ -180,13 +233,13 @@ name automatically.
 
 ---
 
-## 6. Known gaps
+## 7. Known gaps
 
-- **Credential delivery is not built.** Nothing yet stores or hands over
-  account logins, and `/account/orders` cannot show them. This is the core
-  product feature and is still missing.
 - The catalog is a **static TypeScript array**; admin product edits are
   session-only and the UI says so.
+- The admin stock console sits behind the `/admin` Google sign-in gate, so it
+  needs both a signed-in admin and the `admin_api_key`.
+- Wallet and WhatsApp orders are fulfilled by hand.
 - Orders are written to two places: the PHP ledger (authoritative for payment
   state) and Firestore (customer history). The ledger is what the UI trusts.
 - Wallet balances live in `localStorage` and are deliberately **not**

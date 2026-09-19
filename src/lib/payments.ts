@@ -129,6 +129,10 @@ async function getJson<T>(path: string): Promise<ApiResult<T>> {
 export interface PalplusInitiateRequest {
   /** Full order id — stored server-side and echoed back on status calls. */
   orderId: string;
+  /** Cart lines, used to claim inventory once the payment settles. */
+  items: OrderLine[];
+  /** Where the credentials email is sent. */
+  buyerEmail: string;
   /** 12-character M-Pesa account reference. */
   accountReference: string;
   /** Amount in whole KES. */
@@ -141,9 +145,26 @@ export interface PalplusInitiateRequest {
 
 export interface PalplusInitiateResponse {
   order_id: string;
+  /** Secret the buyer needs to read their credentials later. */
+  order_token: string;
   transaction_id: string;
   status: OrderStatus;
   message?: string;
+}
+
+/** One cart line, sent to the server so it can claim stock after payment. */
+export interface OrderLine {
+  product_id: string;
+  name: string;
+  quantity: number;
+}
+
+export function toOrderLines(items: CartItem[]): OrderLine[] {
+  return items.map((i) => ({
+    product_id: i.id,
+    name: i.name,
+    quantity: i.quantity,
+  }));
 }
 
 /** Converts a base USD amount to the exact KES integer we will charge. */
@@ -181,6 +202,10 @@ export async function initiatePalplus(
 
 export interface NowpaymentsInvoiceRequest {
   orderId: string;
+  /** Cart lines, used to claim inventory once the payment settles. */
+  items: OrderLine[];
+  /** Where the credentials email is sent. */
+  buyerEmail: string;
   /** Exact base USD amount. */
   priceUsd: number;
   description: string;
@@ -191,6 +216,8 @@ export interface NowpaymentsInvoiceRequest {
 
 export interface NowpaymentsInvoiceResponse {
   order_id: string;
+  /** Secret the buyer needs to read their credentials later. */
+  order_token: string;
   invoice_id: string;
   invoice_url: string;
   status: OrderStatus;
@@ -271,6 +298,56 @@ export async function pollUntilSettled(
         ? "We have not received confirmation yet. If you completed the payment, it will appear in your orders shortly."
         : undefined,
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Credentials                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface DeliveredCredential {
+  product_id: string;
+  product_name: string;
+  uid: string;
+  /** Raw pasted line: UID|Password|Email */
+  account_data: string;
+}
+
+export interface CredentialsResponse {
+  order_id: string;
+  status: OrderStatus;
+  gateway?: GatewayId;
+  currency?: Currency;
+  amount?: number;
+  buyer_email?: string;
+  created_at?: string;
+  delivered_at?: string;
+  email_sent_at?: string;
+  shortfall?: Record<string, number>;
+  credentials: DeliveredCredential[];
+  items?: OrderLine[];
+}
+
+/**
+ * Fetches the credentials for a paid order.
+ *
+ * The order id alone is not enough — the per-order token issued at checkout is
+ * what authorises the read, so a leaked order id cannot expose credentials.
+ */
+export async function fetchCredentials(
+  orderId: string,
+  token: string
+): Promise<ApiResult<CredentialsResponse>> {
+  return getJson<CredentialsResponse>(
+    `/orders/credentials?order_id=${encodeURIComponent(orderId)}&token=${encodeURIComponent(token)}`
+  );
+}
+
+/** Public stock counts (COUNT of available inventory units). */
+export async function fetchStockCounts(): Promise<ApiResult<{
+  counts: Record<string, number>;
+  generated_at: string;
+}>> {
+  return getJson(`/inventory/counts`);
 }
 
 /* ------------------------------------------------------------------ */

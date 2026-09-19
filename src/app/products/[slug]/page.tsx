@@ -13,6 +13,7 @@ import { useCart } from "@/context/CartContext";
 import { asset } from "@/lib/asset";
 import { discountPercent, splitFlags, stockLabel } from "@/lib/format";
 import { useCurrency } from "@/context/CurrencyContext";
+import { useStock } from "@/context/StockContext";
 import { DELIVERY, SUPPORT } from "@/lib/config";
 import Icon from "@/components/ui/Icon";
 
@@ -23,6 +24,7 @@ export default function ProductDetailPage() {
 
   const { addToCart, setIsCartOpen } = useCart();
   const { format, currency } = useCurrency();
+  const { stockFor } = useStock();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
 
@@ -55,8 +57,9 @@ export default function ProductDetailPage() {
 
   const category = getCategory(product.category);
   const off = discountPercent(product.price_usd, product.original_price_usd);
-  const stock = stockLabel(product.stock);
-  const soldOut = product.stock <= 0;
+  const liveStock = stockFor(product);
+  const stock = stockLabel(liveStock);
+  const soldOut = liveStock <= 0;
   const total = product.price_usd * quantity;
 
   const handleBuyNow = () => {

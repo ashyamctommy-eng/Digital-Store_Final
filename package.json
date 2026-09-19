@@ -9,7 +9,12 @@
     "lint": "eslint",
     "start": "next start",
     "build:cpanel": "node scripts/build-cpanel.mjs",
-    "build:ghpages": "NEXT_PUBLIC_BASE_PATH=/${npm_package_name:-digital-store} next build"
+    "build:ghpages": "NEXT_PUBLIC_BASE_PATH=/${npm_package_name:-digital-store} next build",
+    "test:php": "php server/api/tests/unit.php && php server/api/tests/concurrency.php && bash server/api/tests/http.sh",
+    "test:php:unit": "php server/api/tests/unit.php",
+    "test:php:concurrency": "php server/api/tests/concurrency.php",
+    "test:php:http": "bash server/api/tests/http.sh",
+    "verify": "npm run typecheck && npm run lint && npm run test:php && npm run build:cpanel"
   },
   "dependencies": {
     "firebase": "^12.13.0",

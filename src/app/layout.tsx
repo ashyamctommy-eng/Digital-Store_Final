@@ -4,6 +4,7 @@ import { CartProvider } from "@/context/CartContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { WalletProvider } from "@/context/WalletContext";
 import { CurrencyProvider } from "@/context/CurrencyContext";
+import { StockProvider } from "@/context/StockContext";
 import { ThemeProvider, themeInitScript } from "@/context/ThemeContext";
 import { BRAND } from "@/lib/config";
 import "./globals.css";
@@ -75,7 +76,9 @@ export default function RootLayout({
           <CurrencyProvider>
             <AuthProvider>
               <WalletProvider>
-                <CartProvider>{children}</CartProvider>
+                <StockProvider>
+                  <CartProvider>{children}</CartProvider>
+                </StockProvider>
               </WalletProvider>
             </AuthProvider>
           </CurrencyProvider>

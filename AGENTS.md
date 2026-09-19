@@ -34,3 +34,15 @@ This is **Digital Hub Shop**, a static-exported digital products marketplace
 - Order persistence is fire-and-forget. Never `await` a Firestore write on the
   path between "customer clicked pay" and "gateway redirect" — it stalled
   checkout once already.
+
+### Inventory & dispatch
+
+- Credentials live in `server/api/lib/inventory.php`. Claims happen under an
+  exclusive `flock`; never read-modify-write inventory without it, or two buyers
+  can be handed the same credential.
+- `dispatch_order()` is idempotent by design — a repeated webhook must return the
+  same units rather than claiming more stock.
+- Webhooks answer `json_response_then(...)`: the provider gets its 2xx first and
+  dispatch/email run after. Do not move that work before the response.
+- Run `npm run test:php` after touching anything in `server/api/`. The
+  concurrency test is the one that matters most.

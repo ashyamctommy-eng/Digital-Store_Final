@@ -14,6 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/http.php';
 require_once __DIR__ . '/../lib/store.php';
 require_once __DIR__ . '/../lib/palplus.php';
+require_once __DIR__ . '/../lib/dispatch.php';
 
 $config = load_config();
 apply_cors($config);
@@ -34,6 +35,13 @@ $accountRef = clean_str($body['accountReference'] ?? '', 12);
 $amountKes = (int) ($body['amountKes'] ?? 0);
 $phoneRaw = clean_str($body['phone'] ?? '', 20);
 $desc = clean_str($body['transactionDesc'] ?? 'Order payment', 13);
+// Cart lines, used later to claim stock. Normalised so a malformed payload
+// cannot inject a path or a negative quantity into the ledger.
+$items = dispatch_normalise_items($body['items'] ?? []);
+$buyerEmail = clean_str($body['buyerEmail'] ?? '', 190);
+// Unguessable token: the buyer needs it to read their credentials later.
+// Generated once; an existing order keeps the token it already handed out.
+$orderToken = new_order_token();
 
 if ($orderId === '') {
     json_error('orderId is required.', 422, 'MISSING_ORDER_ID');
@@ -74,6 +82,9 @@ if ($publicBase === '' || !str_starts_with($publicBase, 'https://')) {
 // Record the order before charging so the webhook always finds a match.
 $existing = store_read_order($config, $orderId);
 $order = array_merge($existing ?? [], [
+    'order_token' => (string) ($existing['order_token'] ?? $orderToken),
+    'items' => $items,
+    'buyer_email' => $buyerEmail !== '' ? $buyerEmail : ($existing['buyer_email'] ?? null),
     'order_id' => $orderId,
     'account_reference' => $accountRef,
     'gateway' => 'palplus',
@@ -127,6 +138,7 @@ store_update_order($config, $orderId, [
 
 json_ok([
     'order_id' => $orderId,
+    'order_token' => (string) (store_read_order($config, $orderId)['order_token'] ?? ''),
     'transaction_id' => $transactionId,
     'status' => palplus_map_status($data['status'] ?? 'PENDING'),
     'message' => $data['resultDescription'] ?? 'Payment request sent. Enter your M-Pesa PIN to complete the order.',

@@ -96,4 +96,8 @@ json_ok([
         ?? $order['nowpayments_invoice_id']
         ?? null,
     'message' => $message,
+    // Lets the confirmation screen know it can fetch the credentials.
+    'delivered' => !empty($order['dispatched_at']),
+    'delivered_count' => is_array($order['deliverables'] ?? null) ? count($order['deliverables']) : 0,
+    'shortfall' => $order['shortfall'] ?? [],
 ]);

@@ -46,8 +46,35 @@ return [
     ],
 
     // ---------------------------------------------------------------
+    // Resend — transactional email for credential delivery
+    // Dashboard: https://resend.com/api-keys  (key starts with re_)
+    // `from` must be a domain you have verified in Resend.
+    // ---------------------------------------------------------------
+    'resend' => [
+        'api_key' => '',
+        'from' => 'Digital Hub Shop <orders@your-domain.example>',
+        'reply_to' => '',
+        'enabled' => true,
+    ],
+
+    // ---------------------------------------------------------------
+    // Admin API
+    // Shared secret for the admin-only inventory endpoints. Generate one with:
+    //   php -r "echo bin2hex(random_bytes(24));"
+    // Enter it once in the admin UI; it is stored per browser session.
+    // ---------------------------------------------------------------
+    'admin_api_key' => '',
+
+    // ---------------------------------------------------------------
     // Operational settings
     // ---------------------------------------------------------------
+    // Shown in emails and order exports.
+    'store_name' => 'Digital Hub Shop',
+
+    // When true, product stock on the storefront is driven by
+    // COUNT(available inventory) instead of the static catalog number.
+    'inventory_drives_stock' => true,
+
     // Public HTTPS base URL of this site, used for callback URLs.
     // Palplus rejects localhost and private addresses.
     'public_base_url' => 'https://your-domain.example',

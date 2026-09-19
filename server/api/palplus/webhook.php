@@ -9,7 +9,8 @@
  * transaction from the Palplus API — that response is authoritative. A forged
  * webhook therefore cannot mark an order as paid.
  *
- * Always answers 2xx so Palplus does not retry unnecessarily.
+ * Always answers 2xx so Palplus does not retry unnecessarily. Stock is claimed
+ * and the credentials email is sent AFTER the response is flushed.
  */
 
 declare(strict_types=1);
@@ -17,6 +18,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/http.php';
 require_once __DIR__ . '/../lib/store.php';
 require_once __DIR__ . '/../lib/palplus.php';
+require_once __DIR__ . '/../lib/email.php';
 
 $config = load_config();
 require_method('POST');
@@ -24,10 +26,7 @@ require_method('POST');
 $rawBody = file_get_contents('php://input') ?: '';
 $body = json_decode($rawBody, true);
 if (!is_array($body)) {
-    http_response_code(200);
-    header('Content-Type: application/json');
-    echo json_encode(['ok' => true, 'ignored' => 'unparseable body']);
-    exit;
+    json_response_then(['ok' => true, 'ignored' => 'unparseable body'], static function () {});
 }
 
 $transaction = $body['transaction'] ?? [];
@@ -41,17 +40,10 @@ store_log($config, 'palplus.webhook', [
     'account_reference' => $accountRef,
 ]);
 
-/** Acknowledges the delivery and stops. */
-function ack(array $payload = []): void
-{
-    http_response_code(200);
-    header('Content-Type: application/json');
-    echo json_encode(array_merge(['ok' => true], $payload));
-    exit;
-}
+$noop = static function () {};
 
 if ($transactionId === '' && $accountRef === '') {
-    ack(['ignored' => 'no transaction id or reference']);
+    json_response_then(['ok' => true, 'ignored' => 'no transaction id or reference'], $noop);
 }
 
 // Locate our order via the 12-character M-Pesa reference.
@@ -61,14 +53,14 @@ $order = $accountRef !== ''
 
 if ($order === null) {
     store_log($config, 'palplus.webhook.unmatched', ['account_reference' => $accountRef]);
-    ack(['ignored' => 'unknown order']);
+    json_response_then(['ok' => true, 'ignored' => 'unknown order'], $noop);
 }
 
 $orderId = (string) $order['order_id'];
 
 // Already settled — idempotent no-op.
 if (($order['status'] ?? '') === 'paid') {
-    ack(['already' => 'paid']);
+    json_response_then(['ok' => true, 'already' => 'paid'], $noop);
 }
 
 // Authoritative re-fetch. The payload alone is not trusted.
@@ -81,8 +73,8 @@ if ($authoritative === null) {
         'order_id' => $orderId,
         'transaction_id' => $transactionId,
     ]);
-    // Acknowledge anyway; the poller will confirm via the status endpoint.
-    ack(['deferred' => 'could not verify with provider']);
+    // Acknowledge anyway; the status poller will confirm via the API.
+    json_response_then(['ok' => true, 'deferred' => 'could not verify with provider'], $noop);
 }
 
 $providerStatus = palplus_map_status($authoritative['status'] ?? null);
@@ -103,7 +95,7 @@ if ($providerStatus === 'paid' && $expectedAmount > 0 && $paidAmount !== $expect
         'paid' => $paidAmount,
         'expected' => $expectedAmount,
     ]);
-    ack(['rejected' => 'amount mismatch']);
+    json_response_then(['ok' => true, 'rejected' => 'amount mismatch'], $noop);
 }
 
 store_update_order($config, $orderId, [
@@ -122,4 +114,13 @@ store_log($config, 'palplus.webhook.settled', [
     'mpesa_receipt' => $receipt,
 ]);
 
-ack(['order_id' => $orderId, 'status' => $providerStatus]);
+$response = ['ok' => true, 'order_id' => $orderId, 'status' => $providerStatus];
+
+// Confirm to Palplus first, then hand over the goods.
+if ($providerStatus === 'paid') {
+    json_response_then($response, static function () use ($config, $orderId) {
+        settle_paid_order($config, $orderId);
+    });
+}
+
+json_response_then($response, $noop);

@@ -8,6 +8,8 @@
  * JSON body, using the IPN secret, and sent in the `x-nowpayments-sig` header.
  * A request that fails verification is rejected with 403 and never touches
  * order state — this is what stops a forged callback from marking an order paid.
+ *
+ * Stock is claimed and the credentials email sent AFTER the response is flushed.
  */
 
 declare(strict_types=1);
@@ -15,6 +17,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/http.php';
 require_once __DIR__ . '/../lib/store.php';
 require_once __DIR__ . '/../lib/nowpayments.php';
+require_once __DIR__ . '/../lib/email.php';
 
 $config = load_config();
 require_method('POST');
@@ -26,6 +29,8 @@ store_log($config, 'nowpayments.webhook.received', [
     'bytes' => strlen($rawBody),
     'has_signature' => $signature !== null,
 ]);
+
+$noop = static function () {};
 
 if (!nowpayments_verify_ipn($config, $rawBody, $signature)) {
     store_log($config, 'nowpayments.webhook.rejected', ['reason' => 'bad_signature']);
@@ -51,12 +56,12 @@ $order = store_read_order($config, $orderId);
 if ($order === null) {
     store_log($config, 'nowpayments.webhook.unmatched', ['order_id' => $orderId]);
     // 200 so NOWPayments does not retry an order we simply do not have.
-    json_ok(['ignored' => 'unknown order']);
+    json_response_then(['ok' => true, 'ignored' => 'unknown order'], $noop);
 }
 
 // Idempotent: never regress a settled order.
 if (($order['status'] ?? '') === 'paid') {
-    json_ok(['already' => 'paid']);
+    json_response_then(['ok' => true, 'already' => 'paid'], $noop);
 }
 
 $status = nowpayments_map_status($paymentStatus);
@@ -84,4 +89,12 @@ store_log($config, 'nowpayments.webhook.settled', [
     'payment_status' => $paymentStatus,
 ]);
 
-json_ok(['order_id' => $orderId, 'status' => $status]);
+$response = ['ok' => true, 'order_id' => $orderId, 'status' => $status];
+
+if ($status === 'paid') {
+    json_response_then($response, static function () use ($config, $orderId) {
+        settle_paid_order($config, $orderId);
+    });
+}
+
+json_response_then($response, $noop);

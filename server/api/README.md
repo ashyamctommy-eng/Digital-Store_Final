@@ -14,6 +14,11 @@ into client JavaScript.
 | POST | `/api/nowpayments/webhook` | Receive the NOWPayments IPN |
 | GET | `/api/orders/status?order_id=…` | Order status (used by the polling UI) |
 | GET | `/api/config-status` | Which gateways are configured (no secrets) |
+| GET | `/api/inventory/counts` | Public stock counts, `COUNT(available)` |
+| GET | `/api/orders/credentials?order_id&token` | Credentials for a paid order |
+| POST | `/api/admin/inventory/add` | Bulk credential upload (admin key) |
+| GET | `/api/admin/inventory/list` | Per-product stock totals (admin key) |
+| POST | `/api/admin/inventory/delete` | Remove one unit (admin key) |
 
 `api/.htaccess` rewrites the extensionless paths onto the `.php` files and
 hard-blocks `lib/`, `data/` and `config.php` from HTTP.
@@ -58,10 +63,56 @@ the 12-character M-Pesa reference back to the full order id.
 `data/events.log` records every gateway interaction — the first place to look
 when a payment does not settle.
 
+## inventory_stock queue
+
+One JSON file per product under `data/inventory/`. Each unit is
+`{ id, uid, secret, fields, status, order_id, added_at, sold_at }` and moves
+`available -> sold` exactly once.
+
+Handing the same credential to two buyers is the worst failure this store can
+have, so every mutation happens under an exclusive `flock` on a per-product
+lock file, and read-modify-write never spans two lock acquisitions.
+
+On payment the webhook calls `dispatch_order()`, which claims exactly the
+purchased quantity, binds the units to the order id, and records a **shortfall**
+if stock ran out — the buyer keeps what exists and the admin sees the gap rather
+than a silent failure.
+
+`data/inventory/<product>.json` and `data/events.log` are the first places to
+look when a payment does not deliver.
+
+## Credential access
+
+Each order gets a random 32-hex `order_token` at creation, returned only to the
+buyer's browser. `/api/orders/credentials` requires it, so a leaked order id
+(screenshot, support thread) does not expose credentials.
+
+## Email
+
+After dispatch, `settle_paid_order()` sends the credentials via Resend
+(`POST https://api.resend.com/emails`). It runs after the webhook response has
+been flushed, so the provider gets its 2xx first. Failures are logged, never
+surfaced: the credentials are already on screen and in the ledger.
+
+## Tests
+
+```bash
+npm run test:php              # everything
+npm run test:php:unit         # 71 assertions: parsing, claiming, dispatch, HMAC
+npm run test:php:concurrency  # 10 processes racing for 40 units
+npm run test:php:http         # 42 end-to-end HTTP assertions
+```
+
+`test:php:http` starts PHP's built-in server with `tests/router.php`, which
+emulates the `.htaccess` rewrites. It temporarily writes `config.php` pointing
+at a throwaway data directory, and restores any existing one afterwards.
+
 ## Verified
 
-- Every endpoint's `require_once` targets resolve; brackets balance; no calls to
-  undefined functions.
-- No PHP runtime was available in the build environment, so these files were
-  checked statically rather than executed. **Run one sandbox transaction with
-  your real keys before going live.**
+- 71 unit assertions, 42 HTTP assertions and a 10-process concurrency test all
+  pass against PHP 8.4.
+- The concurrency test is the important one: 10 separate processes race for 40
+  units and every unit goes to exactly one order.
+- Still worth running **one sandbox transaction with your real keys** before
+  going live — provider-side behaviour (STK delivery, invoice settlement, Resend
+  acceptance) cannot be reproduced locally.

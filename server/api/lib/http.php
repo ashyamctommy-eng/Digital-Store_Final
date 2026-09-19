@@ -123,3 +123,66 @@ function short_token(int $length = 8): string
     $bytes = random_bytes((int) ceil($length / 2));
     return substr(strtoupper(bin2hex($bytes)), 0, $length);
 }
+
+/**
+ * Sends a JSON response, flushes it to the client, then runs $after.
+ *
+ * Used by the payment webhooks: the provider gets its 2xx immediately (Palplus
+ * retries on slow responses), and the slower work — claiming stock and sending
+ * the credentials email — happens afterwards. Under PHP-FPM this genuinely runs
+ * post-response; elsewhere the buffers are flushed and it runs inline.
+ */
+function json_response_then(array $payload, callable $after, int $status = 200): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    } else {
+        while (ob_get_level() > 0) {
+            @ob_end_flush();
+        }
+        @flush();
+    }
+
+    try {
+        $after();
+    } catch (Throwable $e) {
+        // Never let post-response work produce a fatal in the access log path.
+        error_log('post-response task failed: ' . $e->getMessage());
+    }
+    exit;
+}
+
+/**
+ * Gate for admin-only endpoints.
+ *
+ * The key lives in config.php and is entered once in the admin UI. It is a
+ * shared secret, not per-user auth — see server/api/README.md for the
+ * Firebase-token upgrade path.
+ */
+function require_admin(array $config): void
+{
+    $expected = trim((string) config_value($config, 'admin_api_key', ''));
+    if ($expected === '') {
+        json_error(
+            'Admin API key is not configured. Set admin_api_key in server/api/config.php.',
+            503,
+            'ADMIN_NOT_CONFIGURED'
+        );
+    }
+
+    $provided = (string) ($_SERVER['HTTP_X_ADMIN_KEY'] ?? '');
+    if ($provided === '' || !hash_equals($expected, $provided)) {
+        json_error('Invalid or missing admin key.', 401, 'UNAUTHORIZED');
+    }
+}
+
+/** Generates the unguessable token that lets a buyer read their credentials. */
+function new_order_token(): string
+{
+    return bin2hex(random_bytes(16));
+}
