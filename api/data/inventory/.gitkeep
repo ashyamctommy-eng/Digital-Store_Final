@@ -1,0 +1,1 @@
+# Stock queue. Must stay writable by PHP (chmod 755 or 775).

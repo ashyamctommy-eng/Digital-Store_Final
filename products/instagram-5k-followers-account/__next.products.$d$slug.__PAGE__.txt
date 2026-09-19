@@ -1,0 +1,9 @@
+1:"$Sreact.fragment"
+2:I[47257,["/_next/static/chunks/0-z7wb.1bt8kp.js","/_next/static/chunks/10qhd-hw~l-p6.js","/_next/static/chunks/0d3shmwh5_nmn.js"],"ClientPageRoot"]
+3:I[81116,["/_next/static/chunks/0-z7wb.1bt8kp.js","/_next/static/chunks/10qhd-hw~l-p6.js","/_next/static/chunks/0d3shmwh5_nmn.js","/_next/static/chunks/0r9k_~gx62qpd.js","/_next/static/chunks/08k_p.6b5lc1s.js","/_next/static/chunks/10f3a-4mklc~x.js"],"default"]
+6:I[97367,["/_next/static/chunks/0-z7wb.1bt8kp.js","/_next/static/chunks/10qhd-hw~l-p6.js","/_next/static/chunks/0d3shmwh5_nmn.js"],"OutletBoundary"]
+7:"$Sreact.suspense"
+0:{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"Component":"$3","serverProvidedParams":{"searchParams":{},"params":{"slug":"instagram-5k-followers-account"},"promises":["$@4","$@5"]}}],[["$","script","script-0",{"src":"/_next/static/chunks/10f3a-4mklc~x.js","async":true}]],["$","$L6",null,{"children":["$","$7",null,{"name":"Next.MetadataOutlet","children":"$@8"}]}]]}],"isPartial":false,"staleTime":300,"varyParams":null,"buildId":"kaj66_kQQNAeJePkYP9vA"}
+4:{}
+5:"$0:rsc:props:children:0:props:serverProvidedParams:params"
+8:null
