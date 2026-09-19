@@ -4,6 +4,7 @@ import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Logo from "./Logo";
 import ThemeToggle from "./ThemeToggle";
+import CurrencySwitcher from "./CurrencySwitcher";
 import WalletBadge from "./WalletBadge";
 import DrawerMenu from "./DrawerMenu";
 import Icon from "./ui/Icon";
@@ -95,6 +96,7 @@ export default function Header() {
 
             {/* Actions */}
             <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+              <CurrencySwitcher />
               <ThemeToggle className="hidden sm:inline-flex" />
               <WalletBadge />
 

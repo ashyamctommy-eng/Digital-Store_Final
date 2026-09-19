@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# cPanel production bundle
+/dist/
+
+# Payment API secrets and the order ledger — never commit these
+server/api/config.php
+server/api/data/*
+!server/api/data/.gitkeep

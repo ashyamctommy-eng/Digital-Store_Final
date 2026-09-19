@@ -15,7 +15,7 @@ import {
   type OrderStatus,
   type StoredOrder,
 } from "@/lib/orders";
-import { formatPrice } from "@/lib/format";
+import { formatPrice } from "@/lib/currency";
 import Icon from "@/components/ui/Icon";
 
 const STATUS_STYLE: Record<string, string> = {
@@ -74,7 +74,7 @@ export default function AdminOrdersPage() {
       list = list.filter((o) =>
         [
           o.id,
-          o.orderRef,
+          o.orderId,
           o.userName,
           o.userEmail,
           o.delivery?.email,
@@ -156,7 +156,7 @@ export default function AdminOrdersPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-mono text-xs font-bold">
-                        {o.orderRef || `#${o.id.slice(0, 8)}`}
+                        {o.orderId || `#${o.id.slice(0, 8)}`}
                       </span>
                       <span
                         className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${
@@ -176,7 +176,7 @@ export default function AdminOrdersPage() {
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="font-extrabold text-sm tabular-nums">
-                      {formatPrice(o.totalAmount ?? 0)}
+                      {formatPrice(o.amountUsd ?? 0, "USD")}
                     </p>
                     <p className="text-[10px] text-[var(--color-ink-faint)]">
                       {o.createdAt
@@ -211,7 +211,7 @@ export default function AdminOrdersPage() {
                               ×{item.quantity}
                             </span>
                             <span className="font-bold tabular-nums">
-                              {formatPrice(item.price * item.quantity)}
+                              {formatPrice(item.price_usd * item.quantity, "USD")}
                             </span>
                           </li>
                         ))}

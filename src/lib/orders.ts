@@ -42,13 +42,20 @@ export const ORDER_STATUSES: OrderStatus[] = [
 ];
 
 export interface Order {
-  orderRef: string;
+  /** Full human-readable id: ORDER_<PRODUCT_ID>_<TIMESTAMP>. */
+  orderId: string;
+  /** 12-character M-Pesa reference (Palplus accountReference). */
+  accountReference?: string;
   userId: string;
   userEmail: string;
   userName: string;
   items: CartItem[];
-  totalAmount: number;
-  currency: string;
+  /** Order total in base USD. */
+  amountUsd: number;
+  /** Currency the customer actually paid in. */
+  displayCurrency?: string;
+  /** Amount charged in that display currency (KES integer, or USD). */
+  displayAmount?: number;
   delivery: DeliveryDetails;
   paymentMethod: string;
   paymentReference: string;
@@ -67,13 +74,15 @@ export interface OrderWithId extends Order {
  */
 export interface StoredOrder {
   id: string;
-  orderRef?: string;
+  orderId?: string;
+  accountReference?: string;
   userId?: string;
   userEmail?: string;
   userName?: string;
   items?: CartItem[];
-  totalAmount?: number;
-  currency?: string;
+  amountUsd?: number;
+  displayCurrency?: string;
+  displayAmount?: number;
   delivery?: Partial<DeliveryDetails>;
   paymentMethod?: string;
   paymentReference?: string;

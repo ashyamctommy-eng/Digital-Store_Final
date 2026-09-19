@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
 import { db } from "@/lib/firestore";
-import { formatPrice } from "@/lib/format";
+import { formatPrice } from "@/lib/currency";
 import type { StoredOrder } from "@/lib/orders";
 
 export default function AdminDashboard() {
@@ -26,12 +26,12 @@ export default function AdminDashboard() {
           createdAt: d.data().createdAt?.toDate(),
         }));
         setRecentOrders(orders);
-        const rev = orders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+        const rev = orders.reduce((sum, o) => sum + (o.amountUsd || 0), 0);
         const pend = orders.filter(
           (o) => o.status === "pending" || o.status === "paid"
         ).length;
         setStats((p) => [
-          { ...p[0], value: formatPrice(rev) },
+          { ...p[0], value: formatPrice(rev, "USD") },
           { ...p[1], value: `${snap.size}` },
           p[2],
           { ...p[3], value: `${pend}` },
@@ -68,7 +68,7 @@ export default function AdminDashboard() {
                 <tr key={o.id} className="border-b hover:bg-gray-50/50">
                   <td className="px-4 py-3 font-mono text-[11px]">#{o.id.slice(0,8)}</td>
                   <td className="px-4 py-3 text-xs">{o.userName || "—"}</td>
-                  <td className="px-4 py-3 text-xs font-bold">{formatPrice(o.totalAmount ?? 0)}</td>
+                  <td className="px-4 py-3 text-xs font-bold">{formatPrice(o.amountUsd ?? 0, "USD")}</td>
                   <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-100">{o.paymentMethod}</span></td>
                   <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${o.status==="paid"||o.status==="delivered"?"bg-green-100 text-green-700":o.status==="failed"?"bg-red-100 text-red-700":"bg-amber-100 text-amber-700"}`}>{o.status ?? "pending"}</span></td>
                 </tr>

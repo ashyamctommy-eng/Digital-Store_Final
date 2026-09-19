@@ -155,11 +155,12 @@ export default function Footer() {
           <div className="flex flex-wrap gap-2">
             {[
               { label: "M-Pesa", className: "bg-[#49B642]/10 text-[#3da636] border-[#49B642]/25" },
-              { label: "Wallet", className: "bg-[var(--color-brand)]/10 text-[var(--color-brand)] border-[var(--color-brand)]/25" },
-              { label: "Visa", className: "bg-[var(--color-line)] text-[var(--color-ink-soft)] border-transparent" },
-              { label: "Mastercard", className: "bg-[var(--color-line)] text-[var(--color-ink-soft)] border-transparent" },
-              { label: "Paystack", className: "bg-[#09A5DB]/10 text-[#0890bf] border-[#09A5DB]/25" },
+              { label: "Palplus", className: "bg-[#49B642]/10 text-[#3da636] border-[#49B642]/25" },
               { label: "USDT", className: "bg-[#26A17B]/10 text-[#1a7a5c] border-[#26A17B]/25" },
+              { label: "BTC", className: "bg-[#F7931A]/10 text-[#c1750f] border-[#F7931A]/25" },
+              { label: "ETH", className: "bg-[#627EEA]/10 text-[#4a5fb5] border-[#627EEA]/25" },
+              { label: "NOWPayments", className: "bg-[var(--color-ink)]/10 text-[var(--color-ink-soft)] border-transparent" },
+              { label: "Wallet", className: "bg-[var(--color-brand)]/10 text-[var(--color-brand)] border-[var(--color-brand)]/25" },
             ].map((method) => (
               <span
                 key={method.label}

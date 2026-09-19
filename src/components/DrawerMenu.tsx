@@ -8,7 +8,7 @@ import { BRAND, SUPPORT } from "@/lib/config";
 import { useCatalog } from "@/context/CatalogContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWallet } from "@/context/WalletContext";
-import { formatBalance } from "@/lib/format";
+import { useCurrency } from "@/context/CurrencyContext";
 import { setBodyScrollLock } from "@/lib/browserStore";
 import ThemeToggle from "./ThemeToggle";
 import Icon from "./ui/Icon";
@@ -24,6 +24,7 @@ export default function DrawerMenu({ isOpen, onClose }: DrawerMenuProps) {
   const { setCategory, setTag, reset } = useCatalog();
   const { user, signOut } = useAuth();
   const { balance } = useWallet();
+  const { format } = useCurrency();
   const pathname = usePathname();
   const router = useRouter();
 
@@ -123,7 +124,7 @@ export default function DrawerMenu({ isOpen, onClose }: DrawerMenuProps) {
                 Wallet
               </span>
               <span className="text-sm font-bold tabular-nums">
-                {formatBalance(balance)}
+                {format(balance)}
               </span>
             </div>
           </div>

@@ -1,28 +1,3 @@
-import { COMMERCE } from "./config";
-
-/** Formats a numeric amount in the store's base currency. */
-export function formatPrice(
-  amount: number,
-  opts: { withCode?: boolean } = {}
-): string {
-  const value = Number.isFinite(amount) ? amount : 0;
-  const hasFraction = Math.round(value * 100) % 100 !== 0;
-  const formatted = value.toLocaleString("en-KE", {
-    minimumFractionDigits: hasFraction ? 2 : 0,
-    maximumFractionDigits: 2,
-  });
-  return `${COMMERCE.symbol} ${formatted}${opts.withCode ? ` ${COMMERCE.currency}` : ""}`;
-}
-
-/** Formats a wallet balance — always two decimals so it reads like money. */
-export function formatBalance(amount: number): string {
-  const value = Number.isFinite(amount) ? amount : 0;
-  return `${COMMERCE.symbol} ${value.toLocaleString("en-KE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
 /** Compact stock label used on cards and detail pages. */
 export function stockLabel(stock: number): { text: string; tone: "in" | "low" | "out" } {
   if (stock <= 0) return { text: "Out of Stock", tone: "out" };

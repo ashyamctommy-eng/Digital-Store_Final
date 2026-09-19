@@ -3,16 +3,16 @@
 import { useMemo, useRef, useState } from "react";
 import { products as initialProducts, type Product } from "@/lib/products";
 import { categories, getCategory } from "@/lib/categories";
-import { COMMERCE } from "@/lib/config";
-import { formatPrice, stockLabel } from "@/lib/format";
+import { formatPrice } from "@/lib/currency";
+import { stockLabel } from "@/lib/format";
 import { asset } from "@/lib/asset";
 import Icon from "@/components/ui/Icon";
 
 const blankForm = {
   name: "",
   category: categories[0].id,
-  price: "",
-  original_price: "",
+  price_usd: "",
+  original_price_usd: "",
   stock: "50",
   country_flags: "🌐",
   description: "",
@@ -51,8 +51,8 @@ export default function AdminProductsPage() {
     setForm({
       name: p.name,
       category: p.category,
-      price: String(p.price),
-      original_price: p.original_price ? String(p.original_price) : "",
+      price_usd: String(p.price_usd),
+      original_price_usd: p.original_price_usd ? String(p.original_price_usd) : "",
       stock: String(p.stock),
       country_flags: p.country_flags,
       description: p.description,
@@ -85,9 +85,8 @@ export default function AdminProductsPage() {
       name,
       category: form.category,
       country_flags: form.country_flags || "🌐",
-      price: parseFloat(form.price) || 0,
-      original_price: form.original_price ? parseFloat(form.original_price) : undefined,
-      currency: COMMERCE.currency,
+      price_usd: parseFloat(form.price_usd) || 0,
+      original_price_usd: form.original_price_usd ? parseFloat(form.original_price_usd) : undefined,
       image: form.image || "/assets/images/proxy-logo.svg",
       stock: parseInt(form.stock, 10) || 0,
       description: form.description,
@@ -215,21 +214,21 @@ export default function AdminProductsPage() {
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className={labelClass}>Price ({COMMERCE.currency})</label>
+                  <label className={labelClass}>Price (USD)</label>
                   <input
                     type="number"
-                    value={form.price}
-                    onChange={(e) => setForm({ ...form, price: e.target.value })}
+                    value={form.price_usd}
+                    onChange={(e) => setForm({ ...form, price_usd: e.target.value })}
                     className={inputClass}
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>Was price</label>
+                  <label className={labelClass}>Was price (USD)</label>
                   <input
                     type="number"
-                    value={form.original_price}
+                    value={form.original_price_usd}
                     onChange={(e) =>
-                      setForm({ ...form, original_price: e.target.value })
+                      setForm({ ...form, original_price_usd: e.target.value })
                     }
                     className={inputClass}
                   />
@@ -392,7 +391,7 @@ export default function AdminProductsPage() {
                 </h3>
                 <div className="flex items-center justify-between mt-2">
                   <span className="font-extrabold text-sm tabular-nums">
-                    {formatPrice(p.price)}
+                    {formatPrice(p.price_usd, "USD")}
                   </span>
                   <span
                     className={`text-[9px] font-bold uppercase ${

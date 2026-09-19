@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { CartProvider } from "@/context/CartContext";
 import { AuthProvider } from "@/context/AuthContext";
 import { WalletProvider } from "@/context/WalletContext";
+import { CurrencyProvider } from "@/context/CurrencyContext";
 import { ThemeProvider, themeInitScript } from "@/context/ThemeContext";
 import { BRAND } from "@/lib/config";
 import "./globals.css";
@@ -71,11 +72,13 @@ export default function RootLayout({
       </head>
       <body className="min-h-dvh flex flex-col">
         <ThemeProvider>
-          <AuthProvider>
-            <WalletProvider>
-              <CartProvider>{children}</CartProvider>
-            </WalletProvider>
-          </AuthProvider>
+          <CurrencyProvider>
+            <AuthProvider>
+              <WalletProvider>
+                <CartProvider>{children}</CartProvider>
+              </WalletProvider>
+            </AuthProvider>
+          </CurrencyProvider>
         </ThemeProvider>
       </body>
     </html>

@@ -18,7 +18,8 @@ export interface CartItem {
   name: string;
   /** Category display name, shown as the small badge in the cart. */
   category: string;
-  price: number;
+  /** Unit price in base USD. */
+  price_usd: number;
   image: string;
   quantity: number;
 }
@@ -30,6 +31,7 @@ interface CartContextType {
   updateQuantity: (id: string, quantity: number) => void;
   clearCart: () => void;
   totalItems: number;
+  /** Cart subtotal in base USD. */
   totalPrice: number;
   isCartOpen: boolean;
   setIsCartOpen: (open: boolean) => void;
@@ -93,7 +95,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const { totalItems, totalPrice } = useMemo(
     () => ({
       totalItems: items.reduce((sum, i) => sum + i.quantity, 0),
-      totalPrice: items.reduce((sum, i) => sum + i.price * i.quantity, 0),
+      totalPrice: items.reduce((sum, i) => sum + i.price_usd * i.quantity, 0),
     }),
     [items]
   );

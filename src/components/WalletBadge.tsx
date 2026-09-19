@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useWallet } from "@/context/WalletContext";
 import { BRAND, COMMERCE, SUPPORT } from "@/lib/config";
-import { formatBalance } from "@/lib/format";
+import { useCurrency } from "@/context/CurrencyContext";
 import Icon from "./ui/Icon";
 
 /**
@@ -16,6 +16,7 @@ import Icon from "./ui/Icon";
  */
 export default function WalletBadge({ className = "" }: { className?: string }) {
   const { balance, hasFunded } = useWallet();
+  const { format, symbol } = useCurrency();
   const [open, setOpen] = useState(false);
 
   // Close on Escape.
@@ -27,7 +28,7 @@ export default function WalletBadge({ className = "" }: { className?: string }) 
   }, [open]);
 
   const topUpMessage = encodeURIComponent(
-    `Hi ${BRAND.fullName}, I'd like to top up my wallet. Amount: ${COMMERCE.symbol} `,
+    `Hi ${BRAND.fullName}, I'd like to top up my wallet. Amount: ${symbol} `,
   );
 
   return (
@@ -42,7 +43,7 @@ export default function WalletBadge({ className = "" }: { className?: string }) 
           <Icon name="wallet" className="w-3.5 h-3.5" />
         </span>
         <span className="text-xs font-bold tabular-nums whitespace-nowrap">
-          {formatBalance(balance)}
+          {format(balance)}
         </span>
       </button>
 
@@ -80,7 +81,7 @@ export default function WalletBadge({ className = "" }: { className?: string }) 
                   Available balance
                 </p>
                 <p className="text-3xl font-extrabold mt-1 tabular-nums">
-                  {formatBalance(balance)}
+                  {format(balance)}
                 </p>
                 <p className="text-[11px] opacity-80 mt-2">
                   {hasFunded
@@ -100,8 +101,7 @@ export default function WalletBadge({ className = "" }: { className?: string }) 
                       key={amount}
                       className="text-center py-2.5 rounded-xl border border-[var(--color-line)] text-xs font-bold tabular-nums"
                     >
-                      {COMMERCE.symbol}
-                      {amount.toLocaleString()}
+                      {format(amount)}
                     </div>
                   ))}
                 </div>

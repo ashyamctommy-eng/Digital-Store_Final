@@ -1,0 +1,51 @@
+# ==========================================================================
+# /api/.htaccess
+# Payment API protection and pretty URLs.
+# ==========================================================================
+
+# Never list directory contents.
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  # --- Hard-block anything that is not an endpoint ----------------------
+  # config.php holds live gateway keys; lib/ holds the clients; data/ holds
+  # the order ledger. None of these may ever be fetched over HTTP.
+  RewriteRule ^lib/ - [F,L]
+  RewriteRule ^data/ - [F,L]
+  RewriteRule ^config\.php$ - [F,L]
+  RewriteRule ^config\.sample\.php$ - [F,L]
+  RewriteRule \.log$ - [F,L]
+  RewriteRule \.json$ - [F,L]
+
+  # --- Pretty URLs: /api/palplus/initiate -> /api/palplus/initiate.php ---
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^(.+)$ $1.php [L]
+</IfModule>
+
+# Belt and braces if mod_rewrite is unavailable on the host.
+<FilesMatch "^(config|config\.sample)\.php$">
+  <IfModule mod_authz_core.c>
+    Require all denied
+  </IfModule>
+  <IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+  </IfModule>
+</FilesMatch>
+
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set Referrer-Policy "no-referrer"
+  # These responses are all dynamic; never let a proxy cache them.
+  Header always set Cache-Control "no-store"
+</IfModule>
+
+# PHP uploads / execution limits for the API are best set per-directory if the
+# host allows it. Uncomment and adjust if your provider permits overrides.
+# <IfModule mod_php.c>
+#   php_flag display_errors off
+#   php_value max_execution_time 60
+# </IfModule>

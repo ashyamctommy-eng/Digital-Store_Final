@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { db } from "@/lib/firestore";
-import { formatPrice } from "@/lib/format";
+import { formatPrice } from "@/lib/currency";
 
 export default function UsersPage() {
   interface CustomerRow {
@@ -44,7 +44,7 @@ const [users, setUsers] = useState<CustomerRow[]>([]);
                 <td className="px-5 py-3 flex items-center gap-2"><div className="w-8 h-8 rounded-full bg-[var(--color-charcoal)] text-white flex items-center justify-center text-xs font-bold">{u.name.charAt(0)}</div><span className="text-xs font-medium">{u.name}</span></td>
                 <td className="px-5 py-3 text-xs text-gray-600">{u.email}</td>
                 <td className="px-5 py-3 text-xs font-bold">{u.orders}</td>
-                <td className="px-5 py-3 text-xs font-bold text-green-700">{formatPrice(u.spent)}</td>
+                <td className="px-5 py-3 text-xs font-bold text-green-700">{formatPrice(u.spent, "USD")}</td>
               </tr>
             ))}
           </tbody>

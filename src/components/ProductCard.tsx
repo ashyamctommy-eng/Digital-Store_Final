@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useCart } from "@/context/CartContext";
 import { getCategory } from "@/lib/categories";
-import { discountPercent, formatPrice, stockLabel } from "@/lib/format";
+import { discountPercent, stockLabel } from "@/lib/format";
+import { useCurrency } from "@/context/CurrencyContext";
 import { asset } from "@/lib/asset";
 import type { Product } from "@/lib/products";
 import Icon from "./ui/Icon";
@@ -11,10 +12,11 @@ import { useState } from "react";
 
 export default function ProductCard({ product }: { product: Product }) {
   const { addToCart } = useCart();
+  const { format } = useCurrency();
   const [justAdded, setJustAdded] = useState(false);
 
   const category = getCategory(product.category);
-  const off = discountPercent(product.price, product.original_price);
+  const off = discountPercent(product.price_usd, product.original_price_usd);
   const stock = stockLabel(product.stock);
   const soldOut = product.stock <= 0;
 
@@ -27,7 +29,7 @@ export default function ProductCard({ product }: { product: Product }) {
       slug: product.slug,
       name: product.name,
       category: category?.name ?? product.category,
-      price: product.price,
+      price_usd: product.price_usd,
       image: product.image,
     });
     setJustAdded(true);
@@ -116,11 +118,11 @@ export default function ProductCard({ product }: { product: Product }) {
         {/* Price */}
         <div className="mt-auto pt-2.5 flex items-baseline gap-1.5 flex-wrap">
           <span className="text-base sm:text-lg font-extrabold text-[var(--color-brand)] tabular-nums">
-            {formatPrice(product.price)}
+            {format(product.price_usd)}
           </span>
-          {product.original_price && (
+          {product.original_price_usd && (
             <span className="text-[11px] text-[var(--color-ink-faint)] line-through tabular-nums">
-              {formatPrice(product.original_price)}
+              {format(product.original_price_usd)}
             </span>
           )}
         </div>

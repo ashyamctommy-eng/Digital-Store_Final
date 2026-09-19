@@ -11,7 +11,8 @@ import {
 import { getCategory } from "@/lib/categories";
 import { useCart } from "@/context/CartContext";
 import { asset } from "@/lib/asset";
-import { discountPercent, formatPrice, splitFlags, stockLabel } from "@/lib/format";
+import { discountPercent, splitFlags, stockLabel } from "@/lib/format";
+import { useCurrency } from "@/context/CurrencyContext";
 import { DELIVERY, SUPPORT } from "@/lib/config";
 import Icon from "@/components/ui/Icon";
 
@@ -21,6 +22,7 @@ export default function ProductDetailPage() {
   const product = slug ? getProductBySlug(slug) : undefined;
 
   const { addToCart, setIsCartOpen } = useCart();
+  const { format, currency } = useCurrency();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
 
@@ -52,10 +54,10 @@ export default function ProductDetailPage() {
   }
 
   const category = getCategory(product.category);
-  const off = discountPercent(product.price, product.original_price);
+  const off = discountPercent(product.price_usd, product.original_price_usd);
   const stock = stockLabel(product.stock);
   const soldOut = product.stock <= 0;
-  const total = product.price * quantity;
+  const total = product.price_usd * quantity;
 
   const handleBuyNow = () => {
     addToCart(
@@ -64,7 +66,7 @@ export default function ProductDetailPage() {
         slug: product.slug,
         name: product.name,
         category: category?.name ?? product.category,
-        price: product.price,
+        price_usd: product.price_usd,
         image: product.image,
       },
       quantity
@@ -193,15 +195,15 @@ export default function ProductDetailPage() {
           {/* Price */}
           <div className="flex items-baseline gap-2.5 mt-4 flex-wrap">
             <span className="text-3xl font-extrabold text-[var(--color-brand)] tabular-nums">
-              {formatPrice(product.price)}
+              {format(product.price_usd)}
             </span>
-            {product.original_price && (
+            {product.original_price_usd && (
               <span className="text-base text-[var(--color-ink-faint)] line-through tabular-nums">
-                {formatPrice(product.original_price)}
+                {format(product.original_price_usd)}
               </span>
             )}
             <span className="text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-soft)]">
-              {product.currency}
+              {currency}
             </span>
           </div>
 
@@ -291,7 +293,7 @@ export default function ProductDetailPage() {
                 Total
               </span>
               <span className="text-2xl font-extrabold text-[var(--color-brand)] tabular-nums">
-                {formatPrice(total)}
+                {format(total)}
               </span>
             </div>
           </div>
@@ -314,7 +316,7 @@ export default function ProductDetailPage() {
               ? "Out of Stock"
               : added
                 ? "Added to Cart"
-                : `Buy Now — ${formatPrice(total)}`}
+                : `Buy Now — ${format(total)}`}
           </button>
 
           <button
@@ -378,7 +380,7 @@ export default function ProductDetailPage() {
                     {item.name}
                   </h3>
                   <p className="text-sm font-extrabold text-[var(--color-brand)] mt-1.5 tabular-nums">
-                    {formatPrice(item.price)}
+                    {format(item.price_usd)}
                   </p>
                 </div>
               </Link>
@@ -395,7 +397,7 @@ export default function ProductDetailPage() {
               Total
             </p>
             <p className="text-lg font-extrabold text-[var(--color-brand)] leading-tight tabular-nums">
-              {formatPrice(total)}
+              {format(total)}
             </p>
           </div>
           <button

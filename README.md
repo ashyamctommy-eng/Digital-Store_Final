@@ -1,124 +1,196 @@
 # Digital Hub Shop
 
 A mobile-first **digital products marketplace** — social media accounts, SMS
-verifications, premium VPN subscriptions and proxies, with instant delivery.
+verifications, premium VPN subscriptions and proxies — with instant delivery,
+dual-currency pricing and M-Pesa + crypto checkout.
 
-Built with Next.js (App Router), TypeScript and Tailwind CSS 4, exported as a
-fully static site and deployed to GitHub Pages.
-
-> Previously this repository was an e-commerce store for physical sports
-> apparel ("RiotGear"). It has been rebuilt around digital delivery: no sizes,
-> no shipping addresses, no carrier integration.
+Next.js (App Router) + TypeScript + Tailwind CSS 4, exported as a static site
+and deployed to cPanel/HostNin behind a small PHP payment API.
 
 ---
 
-## Getting started
+## Quick start
 
 ```bash
 npm install
-npm run dev      # http://localhost:3000
-npm run build    # static export into ./out
+npm run dev            # http://localhost:3000
+npm run typecheck      # tsc --noEmit
 npm run lint
+npm run build:cpanel   # production bundle -> ./dist  (site + PHP API + .htaccess)
 ```
-
-## Architecture
-
-| Concern | Where it lives |
-| --- | --- |
-| Brand, support channels, currency | `src/lib/config.ts` |
-| Catalog (products) | `src/lib/products.ts` |
-| Categories & quick-filter tags | `src/lib/categories.ts` |
-| Announcement cards | `src/lib/notices.ts` (defaults in `config.ts`) |
-| Cart | `src/context/CartContext.tsx` |
-| Wallet | `src/context/WalletContext.tsx` |
-| Theme (light/dark) | `src/context/ThemeContext.tsx` |
-| Search / filter state | `src/context/CatalogContext.tsx` |
-| Browser persistence primitive | `src/lib/browserStore.ts` |
-| Order model | `src/lib/orders.ts` |
-| Payment helpers | `src/lib/checkout.ts` |
-
-### Pages
-
-- `/` — storefront: notice carousel, quick filters, featured rail, per-category
-  banners with product grids. Switches to a flat filtered results view as soon
-  as you search or tap a tag.
-- `/products/[slug]/` — product detail: flag pills, spec list, login-guide link,
-  availability, quantity selector, running total, sticky buy CTA.
-- `/account/orders/`, `/account/settings/` — customer area.
-- `/admin/*` — staff console (dashboard, orders & delivery, products,
-  customers, integrations, store settings). Gated by Google sign-in against
-  `ADMIN_EMAILS` in `src/lib/config.ts`.
-
-### State & persistence
-
-Because the site is a static export there is no server-rendered user state.
-Anything browser-persisted (cart, wallet, theme, notices) goes through
-`src/lib/browserStore.ts`, which wraps `useSyncExternalStore`. This avoids the
-empty-flash and hydration mismatch you get from reading `localStorage` inside a
-`useEffect`.
-
-### Static-export constraints
-
-`next.config.ts` sets `output: "export"` with `trailingSlash` and a `basePath`
-of `/riotgear-storev11` in production. That means:
-
-- No API routes, server actions, middleware, cookies or headers.
-- Dynamic routes need `generateStaticParams()` — products are prerendered from
-  `src/lib/products.ts`.
-- Next.js image optimisation is off (`images.unoptimized`), so local assets must
-  be referenced through `asset()` from `src/lib/asset.ts` to pick up the
-  `basePath`. A bare `src="/assets/..."` will 404 on GitHub Pages.
-- Client-side admin gating can be bypassed. Enforce the same allowlist in your
-  Firestore security rules.
 
 ---
 
-## ⚠️ Payments are not live yet
+## 1. Currency model
 
-This matters before you take real orders.
+**USD is the single source of truth.** Every catalog price is stored as
+`price_usd` and KES is derived at display time, so the two can never drift.
 
-- **Wallet** — the balance lives in `localStorage` and is intentionally *not*
-  self-creditable, because a client-side top-up would let anyone mint money.
-  Funding is confirmed manually; `credit()` is the hook a real ledger would call.
-- **M-Pesa** — `src/lib/checkout.ts` calls Safaricom directly from the browser.
-  A static host cannot hold a consumer secret, so without
-  `NEXT_PUBLIC_MPESA_*` env vars configured it returns a `manual: true` result
-  and routes the customer to WhatsApp. It **never** reports a fake success.
-- **WhatsApp** — the only fully working path today. It builds an order summary
-  and opens `wa.me`.
-- **Card / Paystack** — not wired. The integrations screen is a placeholder and
-  says so.
+```ts
+// src/lib/currency.ts
+export const FX_RATE_KES = 130;   // 1 USD = 130 KES — change here to re-price
+```
 
-To go live, put the payment call behind a backend (or a merchant-of-record such
-as Lemon Squeezy / Gumroad / Payhip, which also handles VAT and file delivery).
+| Visitor | Detected by | Prices shown | Gateway |
+| --- | --- | --- | --- |
+| `country_code === "KE"` | `https://ipapi.co/json/` | `KSh 6,500` | **Palplus** (M-Pesa STK push) |
+| anywhere else | same lookup | `$50.00` | **NOWPayments** (crypto invoice) |
 
-## Persisting catalog & orders
+Resolution order (`src/context/CurrencyContext.tsx`):
 
-- Products are a **static TypeScript array**. The admin product editor is
-  session-only and says so in the UI. Move products into Firestore to persist.
-- Orders are written to the Firestore `orders` collection and read back by
-  `/admin/orders` and `/account/orders`. Firebase config is in
-  `src/lib/firebase.ts` — move it to env vars and restrict it with rules.
+1. A manual choice saved in `localStorage` (`dhs.currency`) always wins.
+2. IP geolocation via ipapi.co.
+3. Fallback: USD.
 
-## Design system
+A **failed** lookup is deliberately *not* persisted, so a transient network
+problem cannot permanently pin a Kenyan visitor to USD.
 
-Tokens are defined in `src/app/globals.css` under `@theme inline`, with a
-class-based dark mode (`.dark` on `<html>`).
+The header carries a manual override pill — `🇰🇪 KES | 🇺🇸 USD` — with a small
+globe badge that appears when the choice was auto-detected and lets the visitor
+re-run detection.
 
-| Token | Value |
+---
+
+## 2. Payments
+
+> Both gateways run server-side. A static-only upload **cannot** take payments:
+> creating a Palplus STK push and receiving a NOWPayments IPN both require a
+> server, and both need API keys that must never ship in the browser bundle.
+
+### Palplus — M-Pesa (KES)
+
+Phone → `POST /api/palplus/initiate` → server triggers the STK push → the
+browser polls `GET /api/orders/status` until a terminal state, showing a live
+"check your phone" modal.
+
+```
+amount            integer KES   (Math.round(price_usd * FX_RATE_KES))
+phone             254XXXXXXXXX
+accountReference  max 12 chars  ← hard M-Pesa limit
+transactionDesc   max 13 chars  ← hard M-Pesa limit
+callbackUrl       https://…/api/palplus/webhook
+```
+
+**Note on the order reference.** The requested
+`ORDER_[PRODUCT_ID]_[TIMESTAMP]` is **too long for M-Pesa**, which caps
+`accountReference` at 12 characters. So the two are separated:
+
+| Purpose | Value |
 | --- | --- |
-| `--color-page` | `#f8f9fa` light / `#0e1116` dark |
-| `--color-panel` | `#ffffff` light / `#171b22` dark |
-| `--color-brand` | `#e63946` |
-| `--color-brand-strong` | `#dc2626` |
-| `--color-blue` → `--color-blue-strong` | `#0066ff` → `#0052cc` (category banners) |
+| Full order id (ledger, NOWPayments, order history, support) | `ORDER_vpn-nord-1y_1789820451527` |
+| M-Pesa statement reference (12 chars) | `DHSVPVVONN5M` |
 
-Cards use `rounded-2xl` with a soft shadow; the type scale is Inter with a
-strong weight hierarchy. Legacy `--color-charcoal` / `--color-accent` /
-`--color-gold` names are aliased onto the new tokens so the older admin screens
-keep rendering.
+`src/lib/payments.ts` keeps the mapping; the webhook resolves the 12-char
+reference back to the full order id.
 
-## Deployment
+### NOWPayments — crypto (USD)
 
-`.github/workflows/deploy.yml` builds and publishes `./out` to GitHub Pages on
-every push to `main`.
+`POST /api/nowpayments/create-invoice` creates a hosted invoice
+(`price_amount`, `price_currency: "usd"`, `order_id`, `ipn_callback_url`) and the
+customer is redirected to `invoice_url`. Settlement arrives by IPN.
+
+### Webhook security
+
+- **NOWPayments** signs the body with HMAC-SHA512 over the key-sorted JSON,
+  using the IPN secret, in the `x-nowpayments-sig` header. A request that fails
+  verification gets a 403 and never touches order state.
+- **Palplus does not sign its callbacks.** The payload is therefore treated as a
+  hint only: the server takes the transaction id from the body and **re-fetches
+  the transaction from the Palplus API**, which is authoritative. A forged
+  webhook cannot mark an order paid. Paid amounts are also checked against the
+  expected amount.
+
+---
+
+## 3. cPanel / HostNin deployment
+
+`npm run build:cpanel` produces `dist/` — upload its **contents** to
+`public_html/`.
+
+```
+dist/
+  index.html, 404.html, products/, account/, admin/, …   static site (34 pages)
+  _next/            hashed JS/CSS/fonts
+  assets/images/    product icons
+  api/              PHP payment endpoints
+  .htaccess         HTTPS, caching, security, webhook rules
+```
+
+Then, on the server:
+
+1. Copy `dist/api/config.sample.php` → `dist/api/config.php` and fill in your
+   Palplus and NOWPayments keys plus `public_base_url`.
+2. `chmod 755 dist/api/data` so PHP can write the order ledger.
+3. Point the Palplus channel callback and the NOWPayments IPN at
+   `https://<domain>/api/palplus/webhook` and `/api/nowpayments/webhook`.
+4. Visit `/api/config-status` to confirm both gateways report `configured`.
+
+### About the SPA fallback in `.htaccess`
+
+The requested
+`RewriteCond %{REQUEST_FILENAME} !-f` + `RewriteRule ^ index.html [L]` is
+**commented out on purpose**. This is a Next.js static export, not an SPA: every
+route is a real directory with its own `index.html`, served by `DirectoryIndex`.
+A blanket rewrite would return the homepage for **every** URL and destroy deep
+links and SEO. Enable it only if you later switch to a true client-side-routed
+SPA.
+
+Webhook CORS headers are included, but note CORS is a *browser* policy — the
+providers call the webhooks server-to-server, so those headers only matter if
+you test the endpoints from a browser console.
+
+---
+
+## 4. Architecture
+
+| Concern | Where |
+| --- | --- |
+| Brand, support, notices, wallet presets | `src/lib/config.ts` |
+| Pricing / FX / gateway routing | `src/lib/currency.ts` |
+| Catalog (22 items, `price_usd`) | `src/lib/products.ts` |
+| Categories & quick-filter tags | `src/lib/categories.ts` |
+| Gateway client (order ids, API calls, polling) | `src/lib/payments.ts` |
+| Order model | `src/lib/orders.ts` |
+| Cart / Wallet / Theme / Catalog / Currency | `src/context/` |
+| Browser persistence (`useSyncExternalStore`) | `src/lib/browserStore.ts` |
+| Payment API (PHP) | `server/api/` |
+| Apache config | `deploy/cpanel/.htaccess` |
+| Bundle builder | `scripts/build-cpanel.mjs` |
+
+**Convention:** all browser-persisted state goes through
+`src/lib/browserStore.ts`. Reading `localStorage` in a `useEffect` and calling
+`setState` trips `react-hooks/set-state-in-effect` and causes an empty-state
+flash on first paint.
+
+**Convention:** local assets must be referenced through `asset()` from
+`src/lib/asset.ts` so they resolve under a non-empty `basePath`. cPanel builds
+use `basePath = ""`; GitHub Pages sets `NEXT_PUBLIC_BASE_PATH=/<repo>`.
+
+---
+
+## 5. Deployment targets
+
+| Target | Command | basePath |
+| --- | --- | --- |
+| cPanel / HostNin | `npm run build:cpanel` → `dist/` | `""` |
+| GitHub Pages | `NEXT_PUBLIC_BASE_PATH=/<repo> npm run build` | `/<repo>` |
+
+`.github/workflows/deploy.yml` derives the Pages basePath from the repository
+name automatically.
+
+---
+
+## 6. Known gaps
+
+- **Credential delivery is not built.** Nothing yet stores or hands over
+  account logins, and `/account/orders` cannot show them. This is the core
+  product feature and is still missing.
+- The catalog is a **static TypeScript array**; admin product edits are
+  session-only and the UI says so.
+- Orders are written to two places: the PHP ledger (authoritative for payment
+  state) and Firestore (customer history). The ledger is what the UI trusts.
+- Wallet balances live in `localStorage` and are deliberately **not**
+  self-creditable — a client-side top-up button would let anyone mint money.
+- Admin gating is client-side; enforce `ADMIN_EMAILS` in Firestore rules too.
+- The Palplus `channelId` must be configured in the Palplus console (or set in
+  `config.php`), otherwise the API returns `400 NO_DEFAULT_CHANNEL`.

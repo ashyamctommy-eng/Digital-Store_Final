@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { getUserOrders, type OrderWithId } from "@/lib/orders";
-import { formatPrice } from "@/lib/format";
+import { useCurrency } from "@/context/CurrencyContext";
 import { asset } from "@/lib/asset";
 import { SUPPORT } from "@/lib/config";
 import Icon from "@/components/ui/Icon";
@@ -20,6 +20,7 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function MyOrdersPage() {
   const { user, loading: authLoading } = useAuth();
+  const { format } = useCurrency();
   const [orders, setOrders] = useState<OrderWithId[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -133,7 +134,7 @@ export default function MyOrdersPage() {
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="min-w-0">
                     <p className="font-mono text-xs font-bold">
-                      {order.orderRef || `#${order.id.slice(0, 8)}`}
+                      {order.orderId || `#${order.id.slice(0, 8)}`}
                     </p>
                     <p className="text-[11px] text-[var(--color-ink-faint)] mt-0.5">
                       {order.createdAt
@@ -154,7 +155,7 @@ export default function MyOrdersPage() {
                       {order.status}
                     </span>
                     <p className="font-extrabold text-sm mt-1.5 tabular-nums">
-                      {formatPrice(order.totalAmount ?? 0)}
+                      {format(order.amountUsd ?? 0)}
                     </p>
                   </div>
                 </div>
@@ -180,7 +181,7 @@ export default function MyOrdersPage() {
                         </p>
                       </div>
                       <p className="text-xs font-bold tabular-nums">
-                        {formatPrice(item.price * item.quantity)}
+                        {format(item.price_usd * item.quantity)}
                       </p>
                     </div>
                   ))}
@@ -205,7 +206,7 @@ export default function MyOrdersPage() {
                 {(order.status === "pending" || order.status === "failed") && (
                   <a
                     href={`https://wa.me/${SUPPORT.whatsapp}?text=${encodeURIComponent(
-                      `Hi, I need help with order ${order.orderRef || order.id}.`
+                      `Hi, I need help with order ${order.orderId || order.id}.`
                     )}`}
                     target="_blank"
                     rel="noopener noreferrer"

@@ -24,20 +24,11 @@ export const SUPPORT = {
 } as const;
 
 export const COMMERCE = {
-  /** Base currency for all catalog prices. */
-  currency: "KES",
-  symbol: "KSh",
   /**
-   * Display currencies. `rate` is "1 KES = rate <code>", used only for
-   * approximate price previews.
+   * Wallet top-up presets, in base USD.
+   * Prices and balances are stored in USD; currency.ts handles display.
    */
-  rates: {
-    KES: 1,
-    USD: 0.0077,
-    NGN: 11.8,
-  } as Record<string, number>,
-  /** Wallet top-up presets, in base currency. */
-  topUpPresets: [500, 1000, 2500, 5000],
+  topUpPresets: [5, 10, 25, 50],
 } as const;
 
 export const DELIVERY = {

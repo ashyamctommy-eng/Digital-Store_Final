@@ -31,6 +31,10 @@ jobs:
         run: npm ci
 
       - name: Build Next.js static export
+        # GitHub Pages serves from /<repo>, so the basePath is derived from the
+        # repository name. cPanel builds leave it empty (see build:cpanel).
+        env:
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
         run: npm run build
 
       - name: Upload artifact

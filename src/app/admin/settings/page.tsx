@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { BRAND, COMMERCE, SUPPORT } from "@/lib/config";
+import { BRAND, SUPPORT } from "@/lib/config";
+import { FX_RATE_KES } from "@/lib/currency";
 import { categories } from "@/lib/categories";
 import {
   ICON_OPTIONS,
@@ -169,9 +170,9 @@ export default function AdminSettingsPage() {
               <p className="text-sm font-bold">{BRAND.fullName}</p>
             </div>
             <div className="rounded-xl bg-[var(--color-page)] p-3">
-              <p className={labelClass}>Currency</p>
+              <p className={labelClass}>Pricing</p>
               <p className="text-sm font-bold">
-                {COMMERCE.symbol} {COMMERCE.currency}
+                USD base · 1 USD = {FX_RATE_KES} KES
               </p>
             </div>
           </div>

@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Build artefacts and the PHP backend are not TypeScript sources.
+    "dist/**",
+    "server/**",
+    "scripts/**",
   ]),
 ]);
 

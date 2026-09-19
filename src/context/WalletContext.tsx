@@ -12,10 +12,13 @@ import { readStore, useStore, writeStore } from "@/lib/browserStore";
 /**
  * Wallet balance.
  *
- * This build keeps the balance in localStorage so the storefront works on a
- * static host with no backend. Swapping in a real ledger (Firestore
- * `wallets/{uid}` or a payment provider) means replacing the read/write calls
- * below — the public API stays identical.
+ * The balance is held in **base USD** and formatted into the visitor's display
+ * currency at render time, the same way catalog prices work.
+ *
+ * This build keeps it in localStorage so the storefront works on a static host
+ * with no backend. Swapping in a real ledger (Firestore `wallets/{uid}` or a
+ * payment provider) means replacing the read/write calls below — the public API
+ * stays identical.
  */
 interface WalletState {
   balance: number;

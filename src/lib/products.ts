@@ -1,4 +1,3 @@
-import { COMMERCE } from "./config";
 import type { SortOption } from "./categories";
 
 /**
@@ -13,9 +12,10 @@ export interface Product {
   /** Category id — see src/lib/categories.ts */
   category: string;
   country_flags: string;
-  price: number;
-  original_price?: number;
-  currency: string;
+  /** Base price in USD — the single source of truth. KES is derived. */
+  price_usd: number;
+  /** Optional strike-through price, also USD. */
+  original_price_usd?: number;
   image: string;
   stock: number;
   description: string;
@@ -29,8 +29,6 @@ export interface Product {
   delivery?: string;
 }
 
-const KES = COMMERCE.currency;
-
 export const products: Product[] = [
   /* ------------------------------- Facebook ------------------------------ */
   {
@@ -39,9 +37,8 @@ export const products: Product[] = [
     name: "USA Facebook Account (Aged / Verified)",
     category: "facebook",
     country_flags: "🇺🇸",
-    price: 6600,
-    original_price: 8000,
-    currency: KES,
+    price_usd: 51.00,
+    original_price_usd: 61.50,
     image: "/assets/images/facebook-3d.svg",
     stock: 150,
     description:
@@ -64,8 +61,7 @@ export const products: Product[] = [
     name: "UK Facebook Account (Aged / Verified)",
     category: "facebook",
     country_flags: "🇬🇧",
-    price: 6300,
-    currency: KES,
+    price_usd: 48.50,
     image: "/assets/images/facebook-3d.svg",
     stock: 96,
     description: "2019-2022 Aged UK Facebook Account | Email verified | Cookies included",
@@ -84,8 +80,7 @@ export const products: Product[] = [
     name: "Nigeria Facebook Account (Fresh)",
     category: "facebook",
     country_flags: "🇳🇬",
-    price: 3800,
-    currency: KES,
+    price_usd: 29.00,
     image: "/assets/images/facebook-3d.svg",
     stock: 240,
     description: "Fresh Nigerian Facebook accounts | Email included | Ready for warm-up",
@@ -105,8 +100,7 @@ export const products: Product[] = [
     name: "Germany Facebook Account (Aged)",
     category: "facebook",
     country_flags: "🇩🇪",
-    price: 6500,
-    currency: KES,
+    price_usd: 50.00,
     image: "/assets/images/facebook-3d.svg",
     stock: 7,
     description: "Aged German Facebook accounts with verified email and cookies",
@@ -126,9 +120,8 @@ export const products: Product[] = [
     name: "Instagram 5K+ Followers Account",
     category: "instagram",
     country_flags: "🇺🇸🇬🇧",
-    price: 8900,
-    original_price: 12000,
-    currency: KES,
+    price_usd: 68.50,
+    original_price_usd: 92.50,
     image: "/assets/images/instagram-3d.svg",
     stock: 42,
     description: "Instagram Accounts | Verified by email | Email included | 5,000+ real followers",
@@ -149,8 +142,7 @@ export const products: Product[] = [
     name: "Instagram 1K+ Followers Account",
     category: "instagram",
     country_flags: "🇺🇸🇨🇦",
-    price: 5200,
-    currency: KES,
+    price_usd: 40.00,
     image: "/assets/images/instagram-3d.svg",
     stock: 130,
     description: "Instagram Accounts | Verified by email | Email included | 1,000+ followers",
@@ -169,8 +161,7 @@ export const products: Product[] = [
     name: "Instagram Aged Empty Account",
     category: "instagram",
     country_flags: "🌍",
-    price: 2900,
-    currency: KES,
+    price_usd: 22.50,
     image: "/assets/images/instagram-3d.svg",
     stock: 310,
     description: "2018-2021 aged Instagram accounts with no posts — perfect clean slate",
@@ -190,8 +181,7 @@ export const products: Product[] = [
     name: "TikTok 600+ Followers Account",
     category: "tiktok",
     country_flags: "🇺🇸🇬🇧🇨🇦🇧🇷🔥",
-    price: 6750,
-    currency: KES,
+    price_usd: 52.00,
     image: "/assets/images/tiktok-3d.svg",
     stock: 80,
     description: "TikTok Accounts | Verified by email | Email included | 500-600+ followers",
@@ -212,9 +202,8 @@ export const products: Product[] = [
     name: "TikTok 1,000+ Followers Account",
     category: "tiktok",
     country_flags: "🇺🇸🇬🇧",
-    price: 10500,
-    original_price: 13000,
-    currency: KES,
+    price_usd: 81.00,
+    original_price_usd: 100.00,
     image: "/assets/images/tiktok-3d.svg",
     stock: 26,
     description: "TikTok Accounts | Verified by email | 1,000+ followers | Live-ready",
@@ -233,8 +222,7 @@ export const products: Product[] = [
     name: "TikTok Monetised Account (Creator Rewards)",
     category: "tiktok",
     country_flags: "🇺🇸🇬🇧🇩🇪",
-    price: 24500,
-    currency: KES,
+    price_usd: 188.50,
     image: "/assets/images/tiktok-3d.svg",
     stock: 6,
     description: "TikTok accounts already approved for the Creator Rewards Programme",
@@ -255,8 +243,7 @@ export const products: Product[] = [
     name: "USA Virtual SMS Number",
     category: "sms",
     country_flags: "🇺🇸",
-    price: 450,
-    currency: KES,
+    price_usd: 3.50,
     image: "/assets/images/sms-3d.svg",
     stock: 999,
     description: "US virtual number for one-time verification codes on any platform",
@@ -277,8 +264,7 @@ export const products: Product[] = [
     name: "UK Virtual SMS Number",
     category: "sms",
     country_flags: "🇬🇧",
-    price: 500,
-    currency: KES,
+    price_usd: 4.00,
     image: "/assets/images/sms-3d.svg",
     stock: 999,
     description: "UK virtual number for platform verification and account creation",
@@ -296,9 +282,8 @@ export const products: Product[] = [
     name: "SMS Verification Bulk Pack (10 Numbers)",
     category: "sms",
     country_flags: "🇺🇸🇬🇧🇨🇦🇩🇪",
-    price: 3800,
-    original_price: 4500,
-    currency: KES,
+    price_usd: 29.00,
+    original_price_usd: 34.50,
     image: "/assets/images/sms-3d.svg",
     stock: 500,
     description: "Ten mixed-region virtual numbers at a discounted bundle rate",
@@ -317,8 +302,7 @@ export const products: Product[] = [
     name: "Long-Term Rental SMS Number (30 Days)",
     category: "sms",
     country_flags: "🇺🇸",
-    price: 2400,
-    currency: KES,
+    price_usd: 18.50,
     image: "/assets/images/sms-3d.svg",
     stock: 60,
     description: "Keep a US number for 30 days — unlimited inbound SMS",
@@ -338,9 +322,8 @@ export const products: Product[] = [
     name: "NordVPN 1 Year Premium Account",
     category: "vpn",
     country_flags: "🛡️",
-    price: 4500,
-    original_price: 9800,
-    currency: KES,
+    price_usd: 34.50,
+    original_price_usd: 75.50,
     image: "/assets/images/nordvpn-logo.svg",
     stock: 45,
     description: "1 Year Premium Subscription | Auto-renewal active | High speed",
@@ -362,8 +345,7 @@ export const products: Product[] = [
     name: "Surfshark VPN 6 Months",
     category: "vpn",
     country_flags: "🛡️",
-    price: 2600,
-    currency: KES,
+    price_usd: 20.00,
     image: "/assets/images/vpn-lock-3d.svg",
     stock: 70,
     description: "6 Months unlimited devices | No-log policy | Clean IPs",
@@ -381,8 +363,7 @@ export const products: Product[] = [
     name: "ExpressVPN 1 Year Subscription",
     category: "vpn",
     country_flags: "🛡️",
-    price: 6200,
-    currency: KES,
+    price_usd: 47.50,
     image: "/assets/images/vpn-lock-3d.svg",
     stock: 18,
     description: "Premium ExpressVPN 12-month subscription with Lightway protocol",
@@ -403,8 +384,7 @@ export const products: Product[] = [
     name: "10 IPs 9Proxy Static Residentials",
     category: "proxy",
     country_flags: "🌐",
-    price: 6000,
-    currency: KES,
+    price_usd: 46.00,
     image: "/assets/images/proxy-logo.svg",
     stock: 999,
     description:
@@ -427,8 +407,7 @@ export const products: Product[] = [
     name: "Rotating Residential Proxies — 5GB",
     category: "proxy",
     country_flags: "🌐",
-    price: 3400,
-    currency: KES,
+    price_usd: 26.00,
     image: "/assets/images/proxy-logo.svg",
     stock: 400,
     description: "5GB rotating residential traffic with automatic IP rotation",
@@ -447,8 +426,7 @@ export const products: Product[] = [
     name: "Mobile 4G Proxies — 5 IPs",
     category: "proxy",
     country_flags: "🇺🇸🌐",
-    price: 7200,
-    currency: KES,
+    price_usd: 55.50,
     image: "/assets/images/proxy-logo.svg",
     stock: 9,
     description: "Premium 4G mobile proxies on US carrier networks",
@@ -467,8 +445,7 @@ export const products: Product[] = [
     name: "Datacenter Proxies — 25 IPs",
     category: "proxy",
     country_flags: "🌐",
-    price: 2200,
-    currency: KES,
+    price_usd: 17.00,
     image: "/assets/images/proxy-logo.svg",
     stock: 320,
     description: "Fast datacenter proxies for scraping and bulk requests",
@@ -547,10 +524,10 @@ export function browseProducts(filters: BrowseFilters = {}): Product[] {
 
   switch (sort) {
     case "price-asc":
-      list = [...list].sort((a, b) => a.price - b.price);
+      list = [...list].sort((a, b) => a.price_usd - b.price_usd);
       break;
     case "price-desc":
-      list = [...list].sort((a, b) => b.price - a.price);
+      list = [...list].sort((a, b) => b.price_usd - a.price_usd);
       break;
     case "new":
       list = [...list].sort(
@@ -569,6 +546,6 @@ export function browseProducts(filters: BrowseFilters = {}): Product[] {
 
 /** Price bounds across the whole catalog, used by the price range filter. */
 export const priceBounds = {
-  min: Math.min(...products.map((p) => p.price)),
-  max: Math.max(...products.map((p) => p.price)),
+  min: Math.min(...products.map((p) => p.price_usd)),
+  max: Math.max(...products.map((p) => p.price_usd)),
 };

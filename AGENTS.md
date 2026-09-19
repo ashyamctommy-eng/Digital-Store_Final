@@ -19,3 +19,18 @@ This is **Digital Hub Shop**, a static-exported digital products marketplace
   (`useSyncExternalStore`) rather than `useEffect` + `setState`, otherwise the
   `react-hooks/set-state-in-effect` lint rule fails and users see an empty flash.
 - `npm run lint` and `npx tsc --noEmit` are both expected to be clean.
+
+### Payments & currency
+
+- Catalog prices are **USD only** (`price_usd`). Never store a KES price; derive
+  it with `formatPrice` / `toKES` from `src/lib/currency.ts`.
+- Gateway calls never go direct from the browser. They hit `/api/*`, which is
+  PHP in `server/api/`. Adding a key to client code is never correct.
+- M-Pesa caps `accountReference` at 12 characters and `transactionDesc` at 13.
+  The full `ORDER_<PRODUCT_ID>_<TIMESTAMP>` id lives in our ledger; the short
+  reference maps back to it.
+- Palplus webhooks are unsigned — verify by re-fetching the transaction from the
+  Palplus API, never by trusting the payload.
+- Order persistence is fire-and-forget. Never `await` a Firestore write on the
+  path between "customer clicked pay" and "gateway redirect" — it stalled
+  checkout once already.

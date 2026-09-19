@@ -4,11 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
+import { useCurrency } from "@/context/CurrencyContext";
 import DeliveryForm from "./DeliveryForm";
 import CheckoutOptions from "./CheckoutButtons";
 import Icon from "./ui/Icon";
 import { asset } from "@/lib/asset";
-import { formatPrice } from "@/lib/format";
 import { DELIVERY } from "@/lib/config";
 import type { DeliveryDetails } from "@/lib/orders";
 import { setBodyScrollLock } from "@/lib/browserStore";
@@ -31,6 +31,7 @@ export default function CartDrawer() {
     lastAddedId,
   } = useCart();
   const { user } = useAuth();
+  const { format } = useCurrency();
 
   const [step, setStep] = useState<Step>("cart");
   const [details, setDetails] = useState<DeliveryDetails | null>(null);
@@ -149,7 +150,7 @@ export default function CartDrawer() {
                         {item.name}
                       </h4>
                       <p className="text-sm font-extrabold mt-1 tabular-nums">
-                        {formatPrice(item.price * item.quantity)}
+                        {format(item.price_usd * item.quantity)}
                       </p>
 
                       <div className="flex items-center gap-2 mt-2">
@@ -210,7 +211,7 @@ export default function CartDrawer() {
 
           {/* ---------------- Step 3: payment ---------------- */}
           {step === "payment" && details && (
-            <CheckoutOptions amount={totalPrice} details={details} />
+            <CheckoutOptions amountUsd={totalPrice} details={details} />
           )}
         </div>
 
@@ -222,7 +223,7 @@ export default function CartDrawer() {
                 Subtotal ({totalItems} {totalItems === 1 ? "item" : "items"})
               </span>
               <span className="font-extrabold text-lg tabular-nums">
-                {formatPrice(totalPrice)}
+                {format(totalPrice)}
               </span>
             </div>
             <div className="flex items-center gap-2 text-[10px] text-[var(--color-ink-soft)]">
