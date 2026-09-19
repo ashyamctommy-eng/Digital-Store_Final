@@ -14,8 +14,10 @@ into client JavaScript.
 | POST | `/api/nowpayments/webhook` | Receive the NOWPayments IPN |
 | GET | `/api/orders/status?order_id=…` | Order status (used by the polling UI) |
 | GET | `/api/config-status` | Which gateways are configured (no secrets) |
-| GET | `/api/inventory/counts` | Public stock counts, `COUNT(available)` |
+| GET | `/api/inventory/counts` | Public stock counts, `COUNT(available)` + `dynamic` |
 | GET | `/api/orders/credentials?order_id&token` | Credentials for a paid order |
+| GET | `/api/orders/sms-status?order_id&token` | Live inbox feed for SMS numbers |
+| GET | `/api/admin/smsotp-status` | Provider balance + service list (admin key) |
 | POST | `/api/admin/inventory/add` | Bulk credential upload (admin key) |
 | GET | `/api/admin/inventory/list` | Per-product stock totals (admin key) |
 | POST | `/api/admin/inventory/delete` | Remove one unit (admin key) |
@@ -81,6 +83,28 @@ than a silent failure.
 `data/inventory/<product>.json` and `data/events.log` are the first places to
 look when a payment does not deliver.
 
+## Hybrid SMS delivery
+
+`catalog.php` (generated from `src/lib/products.ts` by
+`scripts/sync-catalog.mjs`) marks which products are phone numbers and what the
+provider spec is. Fulfilment for those follows a fixed priority in
+`dispatch_claim_sms()`:
+
+1. **Pre-bought stock** — units uploaded as `PHONE_NUMBER | INBOX_URL_OR_NOTES`.
+   Field two becomes an `inbox_url` when it parses as http(s) and a plain note
+   otherwise, so an admin can paste either without getting it wrong. A
+   `javascript:` or `data:` value is refused at ingest and kept only as inert
+   text, because the link is later rendered in an `<iframe>` and an `href`.
+2. **On-demand purchase** — only when static stock is empty AND
+   `smsotp.api_key` is set AND the balance exceeds `min_balance`. Never before
+   the order is paid.
+3. **Shortfall** — recorded for the admin, and the storefront shows Out of Stock
+   from `COUNT(available)` plus the `dynamic` list.
+
+`/api/inventory/counts` caches the provider balance for
+`smsotp.balance_cache_seconds` (default 120) because the storefront asks for
+counts on every page load; the authoritative check runs again at dispatch time.
+
 ## Credential access
 
 Each order gets a random 32-hex `order_token` at creation, returned only to the
@@ -98,10 +122,15 @@ surfaced: the credentials are already on screen and in the ledger.
 
 ```bash
 npm run test:php              # everything
-npm run test:php:unit         # 71 assertions: parsing, claiming, dispatch, HMAC
+npm run test:php:requires     # every call resolves through its require chain
+npm run test:php:unit         # 110 assertions: parsing, claiming, dispatch, HMAC
 npm run test:php:concurrency  # 10 processes racing for 40 units
-npm run test:php:http         # 42 end-to-end HTTP assertions
+npm run test:php:http         # 61 end-to-end HTTP assertions
 ```
+
+`test:php:http` also starts `tests/smsotp-stub.php`, a stub of the provider that
+records how many times it was charged — so "static stock is preferred" and "no
+number is bought on an empty balance" are asserted, not assumed.
 
 `test:php:http` starts PHP's built-in server with `tests/router.php`, which
 emulates the `.htaccess` rewrites. It temporarily writes `config.php` pointing
@@ -109,8 +138,11 @@ at a throwaway data directory, and restores any existing one afterwards.
 
 ## Verified
 
-- 71 unit assertions, 42 HTTP assertions and a 10-process concurrency test all
-  pass against PHP 8.4.
+- 110 unit assertions, 61 HTTP assertions, a require-chain check and a
+  10-process concurrency test all pass against PHP 8.4.
+- `tests/requires.php` exists because the same bug shipped twice: a library
+  calling a helper from a module it did not require, failing only at runtime on
+  whichever endpoint loaded it first. `php -l` cannot see it.
 - The concurrency test is the important one: 10 separate processes race for 40
   units and every unit goes to exactly one order.
 - Still worth running **one sandbox transaction with your real keys** before

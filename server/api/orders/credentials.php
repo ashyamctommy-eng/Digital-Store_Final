@@ -58,9 +58,19 @@ json_ok([
         static fn ($unit) => [
             'product_id' => $unit['product_id'] ?? '',
             'product_name' => $unit['product_name'] ?? ($unit['product_id'] ?? ''),
+            // "credentials" (UID|Password|Email) or "sms" (number + inbox).
+            'kind' => $unit['kind'] ?? 'credentials',
             'uid' => $unit['uid'] ?? '',
             // `secret` is the raw pasted line, i.e. UID|Password|Email.
             'account_data' => $unit['secret'] ?? '',
+            // SMS-only fields.
+            'phone_number' => $unit['phone_number'] ?? null,
+            'inbox_url' => $unit['inbox_url'] ?? null,
+            'notes' => $unit['notes'] ?? null,
+            'source' => $unit['source'] ?? null,
+            'sms_phone_id' => $unit['sms_phone_id'] ?? null,
+            'operator' => $unit['operator'] ?? null,
+            'code' => $unit['code'] ?? null,
         ],
         $deliverables
     ),

@@ -2,18 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { categories, getCategory } from "@/lib/categories";
-import { products } from "@/lib/products";
+import { isSmsProduct, products } from "@/lib/products";
 import { formatPrice } from "@/lib/currency";
 import Icon from "@/components/ui/Icon";
 import {
   adminAddStock,
   adminListStock,
+  adminSmsotpStatus,
   getAdminKey,
   parseCredentialLines,
   setAdminKey,
   type InventoryAddResponse,
   type InventoryDryRunResponse,
   type InventoryListResponse,
+  type SmsotpStatusResponse,
 } from "@/lib/adminApi";
 
 export default function AdminInventoryPage() {
@@ -31,6 +33,7 @@ export default function AdminInventoryPage() {
   const [list, setList] = useState<InventoryListResponse | null>(null);
   const [listError, setListError] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
+  const [smsProvider, setSmsProvider] = useState<SmsotpStatusResponse | null>(null);
 
   // Restore the key from this tab's session storage. Reads happen inside an
   // async body because sessionStorage only exists in the browser, so this
@@ -54,8 +57,13 @@ export default function AdminInventoryPage() {
     let cancelled = false;
 
     (async () => {
-      const res = await adminListStock();
+      const [res, provider] = await Promise.all([
+        adminListStock(),
+        adminSmsotpStatus(),
+      ]);
       if (cancelled) return;
+
+      if (provider.ok && provider.data) setSmsProvider(provider.data);
 
       if (res.ok && res.data) {
         setList(res.data);
@@ -85,10 +93,16 @@ export default function AdminInventoryPage() {
 
   const refreshList = useCallback(() => setRefreshNonce((n) => n + 1), []);
 
-  const parsed = useMemo(() => parseCredentialLines(text), [text]);
-  const needsReview = parsed.filter((p) => !p.wellFormed);
   const selectedProduct = products.find((p) => p.id === productId);
   const category = selectedProduct ? getCategory(selectedProduct.category) : undefined;
+  const selectedIsSms = selectedProduct ? isSmsProduct(selectedProduct) : false;
+  const stockKind = selectedIsSms ? "sms" : "credentials";
+
+  const parsed = useMemo(
+    () => parseCredentialLines(text, stockKind),
+    [text, stockKind]
+  );
+  const needsReview = parsed.filter((p) => !p.wellFormed);
 
   const currentStock = list?.products.find((p) => p.product_id === productId);
 
@@ -251,11 +265,28 @@ export default function AdminInventoryPage() {
                 )}
               </div>
               <div className="text-[10px] text-[var(--color-ink-soft)] leading-relaxed sm:pt-6">
-                One credential per line. Accepted shapes:
-                <br />
-                <code className="text-[10px]">UID|Password|Email</code>
-                <br />
-                <code className="text-[10px]">host:port:user:pass</code>
+                {selectedIsSms ? (
+                  <>
+                    This is an SMS product, so one{" "}
+                    <strong>number per line</strong>:
+                    <br />
+                    <code className="text-[10px]">PHONE_NUMBER | INBOX_URL_OR_NOTES</code>
+                    <br />
+                    <code className="text-[10px]">+15551234567 | https://inbox.example/abc</code>
+                    <br />
+                    Field two is treated as a link when it looks like one and as
+                    a plain note otherwise. Include the country code —{" "}
+                    <code className="text-[10px]">0712345678</code> is ambiguous.
+                  </>
+                ) : (
+                  <>
+                    One credential per line:
+                    <br />
+                    <code className="text-[10px]">UID|Password|Email</code>
+                    <br />
+                    <code className="text-[10px]">host:port:user:pass</code>
+                  </>
+                )}
                 <br />
                 Blank lines and <code>#</code> comments are ignored.
               </div>
@@ -263,7 +294,9 @@ export default function AdminInventoryPage() {
 
             <div className="mt-4">
               <label className={label}>
-                Credentials — one per line
+                {selectedIsSms
+                  ? "Numbers — one per line (PHONE_NUMBER | INBOX_URL_OR_NOTES)"
+                  : "Credentials — one per line"}
               </label>
               <textarea
                 value={text}
@@ -274,7 +307,11 @@ export default function AdminInventoryPage() {
                 }}
                 rows={10}
                 spellCheck={false}
-                placeholder={"acc001|Passw0rd!|mail1@example.com\nacc002|Passw0rd!|mail2@example.com\nhost.example.com:8080:user:pass"}
+                placeholder={
+                  selectedIsSms
+                    ? "+15551234567 | https://inbox.example/abc123\n+15559876543 | Keep this page open\n+12545550123"
+                    : "acc001|Passw0rd!|mail1@example.com\nacc002|Passw0rd!|mail2@example.com\nhost.example.com:8080:user:pass"
+                }
                 className={`${inputClass} font-mono text-[11px] resize-y leading-relaxed`}
               />
             </div>
@@ -288,18 +325,31 @@ export default function AdminInventoryPage() {
                   </span>
                   {needsReview.length > 0 && (
                     <span className="text-[var(--color-warning)] font-bold">
-                      {needsReview.length} without a{" "}
-                      <code>UID|Password</code> pair
+                      {needsReview.length}{" "}
+                      {selectedIsSms ? "missing an inbox link" : "without a UID|Password pair"}
+                    </span>
+                  )}
+                  {selectedIsSms && parsed.some((p) => p.needsReview) && (
+                    <span className="text-[var(--color-warning)] font-bold">
+                      {parsed.filter((p) => p.needsReview).length} without a country code
                     </span>
                   )}
                 </div>
-                <p className="text-[10px] text-[var(--color-ink-faint)] mt-1.5 font-mono break-all">
-                  {parsed
-                    .slice(0, 3)
-                    .map((p) => p.uid)
-                    .join("  ·  ")}
-                  {parsed.length > 3 ? `  ·  +${parsed.length - 3} more` : ""}
-                </p>
+                <ul className="text-[10px] text-[var(--color-ink-faint)] mt-1.5 font-mono break-all space-y-0.5">
+                  {parsed.slice(0, 3).map((p, i) => (
+                    <li key={`${p.uid}-${i}`}>
+                      {selectedIsSms ? (
+                        <>
+                          {p.phone}
+                          {p.inboxUrl ? `  →  ${p.inboxUrl}` : p.notes ? `  →  ${p.notes}` : "  →  (no inbox yet)"}
+                        </>
+                      ) : (
+                        p.uid
+                      )}
+                    </li>
+                  ))}
+                  {parsed.length > 3 && <li>+{parsed.length - 3} more</li>}
+                </ul>
               </div>
             )}
 
@@ -443,6 +493,75 @@ export default function AdminInventoryPage() {
             )}
           </div>
 
+          {/* On-demand SMS provider */}
+          <div className={card}>
+            <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)] mb-4">
+              On-Demand SMS Provider
+            </h2>
+
+            {!smsProvider ? (
+              <p className="text-sm text-[var(--color-ink-faint)] animate-pulse">
+                Checking…
+              </p>
+            ) : !smsProvider.configured ? (
+              <p className="text-[11px] text-[var(--color-ink-soft)] leading-relaxed">
+                Not configured. SMS products are fulfilled from pre-bought stock
+                only. Add <code>smsotp.api_key</code> to{" "}
+                <code>server/api/config.php</code> to enable buying numbers on
+                demand when stock runs out.
+              </p>
+            ) : (
+              <>
+                <div className="rounded-xl bg-[var(--color-page)] p-3 mb-3">
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-[var(--color-ink-faint)]">
+                    Balance
+                  </p>
+                  <p className="text-xl font-extrabold tabular-nums mt-0.5">
+                    ${smsProvider.balance.toFixed(2)}
+                  </p>
+                  <p
+                    className={`text-[10px] font-bold mt-1 ${
+                      smsProvider.balance_ok
+                        ? "text-[var(--color-success)]"
+                        : "text-[var(--color-danger)]"
+                    }`}
+                  >
+                    {smsProvider.balance_ok
+                      ? "On-demand fallback is active"
+                      : smsProvider.balance_error || "Balance unavailable"}
+                  </p>
+                </div>
+
+                <ul className="text-[10px] text-[var(--color-ink-soft)] space-y-1 leading-relaxed">
+                  <li>
+                    {smsProvider.sms_products} SMS product
+                    {smsProvider.sms_products === 1 ? "" : "s"} can be bought on
+                    demand when pre-bought stock is empty.
+                  </li>
+                  {Object.keys(smsProvider.missing_service_ids).length > 0 && (
+                    <li className="text-[var(--color-warning)] font-bold">
+                      Unknown service codes:{" "}
+                      {Object.entries(smsProvider.missing_service_ids)
+                        .map(([pid, code]) => `${pid} (${code})`)
+                        .join(", ")}
+                    </li>
+                  )}
+                  {smsProvider.services.length > 0 && (
+                    <li>
+                      Provider knows {smsProvider.services.length} services,
+                      including{" "}
+                      {smsProvider.services
+                        .slice(0, 4)
+                        .map((s) => s.id)
+                        .join(", ")}
+                      .
+                    </li>
+                  )}
+                </ul>
+              </>
+            )}
+          </div>
+
           <div className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-page)] p-4">
             <p className="text-[11px] text-[var(--color-ink-soft)] leading-relaxed">
               Adding stock here immediately changes the public count on the
@@ -450,6 +569,11 @@ export default function AdminInventoryPage() {
               number of units purchased, binds them to the order and emails them
               to the buyer. A product with no uploaded rows keeps its catalog
               number, so nothing can accidentally sell out.
+              <br />
+              <br />
+              SMS products prefer pre-bought numbers. Only when those run out,
+              and only when the provider balance is above the minimum, is a
+              number bought on demand — and never before the order is paid.
             </p>
           </div>
         </div>

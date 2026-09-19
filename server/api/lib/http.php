@@ -181,6 +181,65 @@ function require_admin(array $config): void
     }
 }
 
+/**
+ * Minimal JSON HTTP client.
+ *
+ * @return array{status:int, body:array|null, raw:string, error:string|null}
+ */
+function http_json_request(
+    string $method,
+    string $url,
+    array $headers = [],
+    ?array $payload = null,
+    int $timeoutSeconds = 30
+): array {
+    $ch = curl_init($url);
+
+    $headerLines = [];
+    foreach ($headers as $key => $value) {
+        $headerLines[] = $key . ': ' . $value;
+    }
+    $headerLines[] = 'Accept: application/json';
+
+    $options = [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CUSTOMREQUEST => strtoupper($method),
+        CURLOPT_TIMEOUT => $timeoutSeconds,
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_FOLLOWLOCATION => false,
+        CURLOPT_HTTPHEADER => $headerLines,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_SSL_VERIFYHOST => 2,
+        CURLOPT_USERAGENT => 'DigitalHubShop/1.0',
+    ];
+
+    if ($payload !== null) {
+        $options[CURLOPT_POSTFIELDS] = json_encode($payload, JSON_UNESCAPED_SLASHES);
+        $headerLines[] = 'Content-Type: application/json';
+        $options[CURLOPT_HTTPHEADER] = $headerLines;
+    }
+
+    curl_setopt_array($ch, $options);
+
+    $raw = curl_exec($ch);
+    $error = curl_error($ch);
+    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($raw === false) {
+        return ['status' => 0, 'body' => null, 'raw' => '', 'error' => $error ?: 'network error'];
+    }
+
+    $decoded = json_decode((string) $raw, true);
+
+    return [
+        'status' => $status,
+        'body' => is_array($decoded) ? $decoded : null,
+        'raw' => substr((string) $raw, 0, 2000),
+        'error' => null,
+    ];
+}
+
 /** Generates the unguessable token that lets a buyer read their credentials. */
 function new_order_token(): string
 {

@@ -14,6 +14,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/http.php';
+
 function store_data_dir(array $config): string
 {
     $dir = (string) config_value($config, 'data_dir', __DIR__ . '/../data');

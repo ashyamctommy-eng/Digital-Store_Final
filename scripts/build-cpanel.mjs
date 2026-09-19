@@ -43,6 +43,15 @@ async function dirSize(dir) {
 
 async function main() {
   // ---------------------------------------------------------------
+  // 0. Regenerate the server-side catalog map from the TS catalog
+  // ---------------------------------------------------------------
+  console.log("\n▸ Syncing the server-side catalog map\n");
+  execFileSync("node", [path.join(root, "scripts", "sync-catalog.mjs")], {
+    cwd: root,
+    stdio: "inherit",
+  });
+
+  // ---------------------------------------------------------------
   // 1. Build the static export from the domain root
   // ---------------------------------------------------------------
   console.log("\n▸ Building static export for cPanel (basePath = \"\")\n");

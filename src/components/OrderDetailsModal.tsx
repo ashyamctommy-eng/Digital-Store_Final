@@ -5,11 +5,13 @@ import Icon from "./ui/Icon";
 import { fetchCredentials, type DeliveredCredential } from "@/lib/payments";
 import type { LocalOrder } from "@/lib/orderStore";
 import {
+  SMS_WARNINGS,
   USAGE_WARNINGS,
   allCredentialsText,
   copyText,
   downloadOrderText,
 } from "@/lib/orderText";
+import SmsNumberCard from "./SmsNumberCard";
 
 interface OrderDetailsModalProps {
   order: LocalOrder;
@@ -78,6 +80,10 @@ export default function OrderDetailsModal({
       cancelled = true;
     };
   }, [order.orderId, order.token, hasToken]);
+
+  const smsNumbers = (credentials ?? []).filter((c) => c.kind === "sms");
+  const plainCredentials = (credentials ?? []).filter((c) => c.kind !== "sms");
+  const hasSms = smsNumbers.length > 0 || order.items.some((i) => i.product_id.startsWith("sms-"));
 
   const totalQty = order.items.reduce((sum, i) => sum + i.quantity, 0);
   const productTitle =
@@ -160,7 +166,7 @@ export default function OrderDetailsModal({
         {/* Usage warnings */}
         <div className="bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200 dark:border-amber-500/25 px-5 py-3 flex-shrink-0">
           <ul className="space-y-1">
-            {USAGE_WARNINGS.map((w) => (
+            {(hasSms ? SMS_WARNINGS : USAGE_WARNINGS).map((w) => (
               <li
                 key={w}
                 className="flex items-start gap-2 text-[10px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300"
@@ -235,22 +241,51 @@ export default function OrderDetailsModal({
               Loading credentials…
             </p>
           ) : credentials && credentials.length > 0 ? (
-            <div className="rounded-2xl border border-[var(--color-line)] overflow-hidden">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-[var(--color-page)] text-[9px] font-extrabold uppercase tracking-[0.12em] text-[var(--color-ink-faint)]">
-                    <th className="px-3 py-2.5 w-[34%]">UID</th>
-                    <th className="px-3 py-2.5">Account Data</th>
-                    <th className="px-3 py-2.5 w-16 text-right">Copy</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {credentials.map((cred, i) => (
-                    <CredentialTableRow key={`${cred.uid}-${i}`} cred={cred} />
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <>
+              {/* SMS numbers: number + inbox, with an optional embedded view */}
+              {smsNumbers.length > 0 && (
+                <div className="rounded-2xl border border-[var(--color-line)] overflow-hidden mb-4">
+                  <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-[var(--color-page)] border-b border-[var(--color-line)]">
+                    <span className="text-[9px] font-extrabold uppercase tracking-[0.12em] text-[var(--color-ink-faint)]">
+                      Numbers &amp; live inbox
+                    </span>
+                    <span className="text-[9px] font-bold text-[var(--color-ink-faint)]">
+                      {smsNumbers.length}
+                    </span>
+                  </div>
+                  <ul className="divide-y divide-[var(--color-line)]">
+                    {smsNumbers.map((cred, i) => (
+                      <SmsNumberCard
+                        key={`${cred.uid}-${i}`}
+                        cred={cred}
+                        orderId={order.orderId}
+                        token={order.token}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Everything else: the standard credential table */}
+              {plainCredentials.length > 0 && (
+                <div className="rounded-2xl border border-[var(--color-line)] overflow-hidden">
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-[var(--color-page)] text-[9px] font-extrabold uppercase tracking-[0.12em] text-[var(--color-ink-faint)]">
+                        <th className="px-3 py-2.5 w-[34%]">UID</th>
+                        <th className="px-3 py-2.5">Account Data</th>
+                        <th className="px-3 py-2.5 w-16 text-right">Copy</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {plainCredentials.map((cred, i) => (
+                        <CredentialTableRow key={`${cred.uid}-${i}`} cred={cred} />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           ) : (
             <div className="text-center py-10">
               <div className="w-12 h-12 rounded-full bg-[var(--color-line)] flex items-center justify-center mx-auto mb-3">

@@ -5,6 +5,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/http.php';
+
 function nowpayments_is_configured(array $config): bool
 {
     return trim((string) config_value($config, 'nowpayments.api_key', '')) !== '';

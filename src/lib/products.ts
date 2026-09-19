@@ -27,6 +27,24 @@ export interface Product {
   featured?: boolean;
   /** Roughly how fast the item is handed over after payment. */
   delivery?: string;
+  /**
+   * How this product is fulfilled.
+   *  - "credentials" (default): a pre-bought account line from inventory.
+   *  - "sms": a phone number + inbox, served from pre-bought stock first and
+   *    from the on-demand provider only when static stock runs out.
+   */
+  delivery_kind?: "credentials" | "sms";
+  /** Required when delivery_kind is "sms". Drives the on-demand provider. */
+  sms?: {
+    /** Provider service code: wa, tg, fb, go, lf … */
+    service_id: string;
+    /** Provider country id (see the provider's /countries). */
+    country_id: string;
+    /** 1 = all countries, 2 = USA only, 3 = requires provider_id. */
+    server_id?: string;
+    /** Display label for the service being verified. */
+    label: string;
+  };
 }
 
 export const products: Product[] = [
@@ -237,82 +255,135 @@ export const products: Product[] = [
   },
 
   /* --------------------------------- SMS -------------------------------- */
+  /*
+   * Every product here uses delivery_kind "sms": fulfilment tries pre-bought
+   * static stock first (PHONE | INBOX_URL_OR_NOTES) and falls back to the
+   * on-demand provider when that runs out. If neither is available the
+   * storefront shows Out of Stock and checkout is disabled.
+   */
   {
-    id: "sms-us-01",
-    slug: "usa-virtual-sms-number",
-    name: "USA Virtual SMS Number",
+    id: "sms-whatsapp",
+    slug: "whatsapp-sms-verification-number",
+    name: "WhatsApp SMS Verification Number",
     category: "sms",
-    country_flags: "🇺🇸",
-    price_usd: 3.50,
+    country_flags: "🇺🇸🇬🇧🇨🇦",
+    price_usd: 4.50,
+    original_price_usd: 7.50,
     image: "/assets/images/sms-3d.svg",
-    stock: 999,
-    description: "US virtual number for one-time verification codes on any platform",
+    // Availability comes from pre-bought stock or the provider,
+    // never from a hard-coded number.
+    stock: 0,
+    description:
+      "A private number that receives the WhatsApp verification code for you | Live inbox included",
     specs: [
-      "Works with WhatsApp, Telegram, Google, X",
-      "Code arrives in 10-60 seconds",
-      "Single-use, never recycled",
-      "No personal details required",
+      "Fresh number reserved for your order only",
+      "Watch the code arrive in the live inbox",
+      "Works for new WhatsApp registrations",
+      "Never reused once it has been sold",
     ],
     guide_url: "",
     badge: "Best Seller",
     featured: true,
     delivery: "Instant",
+    delivery_kind: "sms",
+    sms: { service_id: "wa", country_id: "2", server_id: "2", label: "WhatsApp" },
   },
   {
-    id: "sms-uk-02",
-    slug: "uk-virtual-sms-number",
-    name: "UK Virtual SMS Number",
+    id: "sms-telegram",
+    slug: "telegram-sms-verification-number",
+    name: "Telegram SMS Verification Number",
     category: "sms",
-    country_flags: "🇬🇧",
-    price_usd: 4.00,
+    country_flags: "🇺🇸🇬🇧",
+    price_usd: 4.20,
     image: "/assets/images/sms-3d.svg",
-    stock: 999,
-    description: "UK virtual number for platform verification and account creation",
+    // Availability comes from pre-bought stock or the provider,
+    // never from a hard-coded number.
+    stock: 0,
+    description:
+      "Receive the Telegram login code on a dedicated number | Live inbox included",
     specs: [
-      "UK (+44) number range",
-      "Supports most major platforms",
-      "Delivery typically under a minute",
+      "Dedicated number for your order",
+      "Live inbox with the code as it lands",
+      "Works with new Telegram accounts",
+      "Replacement if no code arrives",
     ],
     guide_url: "",
     delivery: "Instant",
+    delivery_kind: "sms",
+    sms: { service_id: "tg", country_id: "2", server_id: "2", label: "Telegram" },
   },
   {
-    id: "sms-bulk-03",
-    slug: "sms-verification-bulk-pack",
-    name: "SMS Verification Bulk Pack (10 Numbers)",
+    id: "sms-facebook",
+    slug: "facebook-sms-verification-number",
+    name: "Facebook SMS Verification Number",
     category: "sms",
-    country_flags: "🇺🇸🇬🇧🇨🇦🇩🇪",
-    price_usd: 29.00,
-    original_price_usd: 34.50,
+    country_flags: "🇺🇸🇬🇧🇨🇦",
+    price_usd: 4.20,
     image: "/assets/images/sms-3d.svg",
-    stock: 500,
-    description: "Ten mixed-region virtual numbers at a discounted bundle rate",
+    // Availability comes from pre-bought stock or the provider,
+    // never from a hard-coded number.
+    stock: 0,
+    description:
+      "Verify or recover a Facebook account with a dedicated SMS number",
     specs: [
-      "10 numbers, mixed US/UK/CA/DE",
-      "Best per-number rate we offer",
-      "Ideal for bulk account creation",
+      "Dedicated number for your order",
+      "Live inbox with the code as it lands",
+      "Suited to sign-up and recovery flows",
+      "Replacement if no code arrives",
     ],
     guide_url: "",
-    badge: "Restocked",
+    badge: "New Arrival",
     delivery: "Instant",
+    delivery_kind: "sms",
+    sms: { service_id: "fb", country_id: "2", server_id: "2", label: "Facebook" },
   },
   {
-    id: "sms-longterm-04",
-    slug: "long-term-rental-sms-number",
-    name: "Long-Term Rental SMS Number (30 Days)",
+    id: "sms-google",
+    slug: "google-youtube-sms-verification-number",
+    name: "Google / YouTube SMS Verification Number",
     category: "sms",
     country_flags: "🇺🇸",
-    price_usd: 18.50,
+    price_usd: 3.50,
     image: "/assets/images/sms-3d.svg",
-    stock: 60,
-    description: "Keep a US number for 30 days — unlimited inbound SMS",
+    // Availability comes from pre-bought stock or the provider,
+    // never from a hard-coded number.
+    stock: 0,
+    description:
+      "Verify a Google, Gmail or YouTube account with a dedicated number",
     specs: [
-      "30-day number retention",
-      "Unlimited inbound verification codes",
-      "Web dashboard access included",
+      "Dedicated number for your order",
+      "Live inbox with the code as it lands",
+      "Gmail, YouTube and Google account flows",
+      "Replacement if no code arrives",
     ],
-    guide_url: "https://drive.google.com/",
-    delivery: "Within 30 minutes",
+    guide_url: "",
+    delivery: "Instant",
+    delivery_kind: "sms",
+    sms: { service_id: "go", country_id: "2", server_id: "2", label: "Google" },
+  },
+  {
+    id: "sms-tiktok",
+    slug: "tiktok-sms-verification-number",
+    name: "TikTok SMS Verification Number",
+    category: "sms",
+    country_flags: "🇺🇸🇬🇧",
+    price_usd: 3.50,
+    image: "/assets/images/sms-3d.svg",
+    // Availability comes from pre-bought stock or the provider,
+    // never from a hard-coded number.
+    stock: 0,
+    description:
+      "Verify a TikTok account with a dedicated number and live inbox",
+    specs: [
+      "Dedicated number for your order",
+      "Live inbox with the code as it lands",
+      "Works for sign-up and login checks",
+      "Replacement if no code arrives",
+    ],
+    guide_url: "",
+    delivery: "Instant",
+    delivery_kind: "sms",
+    sms: { service_id: "lf", country_id: "2", server_id: "2", label: "TikTok" },
   },
 
   /* --------------------------------- VPN -------------------------------- */
@@ -549,3 +620,34 @@ export const priceBounds = {
   min: Math.min(...products.map((p) => p.price_usd)),
   max: Math.max(...products.map((p) => p.price_usd)),
 };
+
+/* ---------------------------------------------------------------------- */
+/* Delivery kinds                                                          */
+/* ---------------------------------------------------------------------- */
+
+/** True when a product is fulfilled as a phone number + inbox. */
+export function isSmsProduct(product: Product): boolean {
+  return product.delivery_kind === "sms";
+}
+
+export interface SmsSpec {
+  service_id: string;
+  country_id: string;
+  server_id: string;
+  label: string;
+}
+
+/** The on-demand provider spec for an SMS product, if it has one. */
+export function getSmsSpec(productId: string): SmsSpec | null {
+  const product = products.find((p) => p.id === productId);
+  if (!product || !product.sms) return null;
+  return {
+    service_id: product.sms.service_id,
+    country_id: product.sms.country_id,
+    server_id: product.sms.server_id ?? "1",
+    label: product.sms.label,
+  };
+}
+
+/** Every SMS product, used to keep the server-side catalog map in step. */
+export const smsProducts: Product[] = products.filter(isSmsProduct);

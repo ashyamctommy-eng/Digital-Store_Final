@@ -119,6 +119,24 @@ export function adminListStock(): Promise<ApiResult<InventoryListResponse>> {
   return adminFetch("/admin/inventory/list", { method: "GET" });
 }
 
+export interface SmsotpStatusResponse {
+  configured: boolean;
+  balance: number;
+  balance_ok: boolean;
+  balance_error: string | null;
+  min_balance: number;
+  api_base: string;
+  sms_products: number;
+  services: { id: string; name: string }[];
+  /** Catalog service codes the provider does not recognise. */
+  missing_service_ids: Record<string, string>;
+}
+
+/** On-demand SMS provider status, for the stock console. */
+export function adminSmsotpStatus(): Promise<ApiResult<SmsotpStatusResponse>> {
+  return adminFetch("/admin/smsotp-status", { method: "GET" });
+}
+
 export function adminDeleteUnit(
   productId: string,
   unitId: string
@@ -136,6 +154,12 @@ export interface ParsedLine {
   secret: string;
   fields: string[];
   wellFormed: boolean;
+  /** SMS only. */
+  phone?: string;
+  inboxUrl?: string;
+  notes?: string;
+  /** The number has no country code, so its country is ambiguous. */
+  needsReview?: boolean;
 }
 
 /**
@@ -143,7 +167,17 @@ export interface ParsedLine {
  * before they press the button. Kept deliberately in step with
  * `inventory_parse_lines()` in server/api/lib/inventory.php.
  */
-export function parseCredentialLines(text: string): ParsedLine[] {
+const URL_PATTERN = /^https?:\/\/[^\s<>"]+$/i;
+
+function normalizePhone(value: string): string {
+  const digits = value.replace(/[^\d+]/g, "").replace(/^\+/, "");
+  return digits ? `+${digits}` : "";
+}
+
+export function parseCredentialLines(
+  text: string,
+  kind: "credentials" | "sms" = "credentials"
+): ParsedLine[] {
   const seen = new Set<string>();
   const out: ParsedLine[] = [];
 
@@ -156,8 +190,30 @@ export function parseCredentialLines(text: string): ParsedLine[] {
     let fields: string[] = [];
     if (line.includes("|")) {
       fields = line.split("|").map((f) => f.trim());
+    } else if (kind === "sms") {
+      fields = [line];
     } else if ((line.match(/:/g)?.length ?? 0) >= 2 && !line.includes(" ")) {
       fields = line.split(":").map((f) => f.trim());
+    }
+
+    if (kind === "sms") {
+      const phone = normalizePhone(fields[0] ?? "");
+      if (!phone) continue; // not a number, so not stock
+      const second = fields[1] ?? "";
+      const isUrl = URL_PATTERN.test(second);
+      out.push({
+        uid: phone,
+        secret: line,
+        fields,
+        phone,
+        inboxUrl: isUrl ? second : undefined,
+        notes: isUrl ? undefined : second || undefined,
+        // "0712345678" is a valid pattern in several countries, so a missing
+        // country code is worth flagging rather than guessing.
+        needsReview: phone.startsWith("+0"),
+        wellFormed: Boolean(second),
+      });
+      continue;
     }
 
     const uid = fields[0] || `UNIT-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;

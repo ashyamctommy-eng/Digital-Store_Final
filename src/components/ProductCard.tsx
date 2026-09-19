@@ -14,15 +14,18 @@ import { useState } from "react";
 export default function ProductCard({ product }: { product: Product }) {
   const { addToCart } = useCart();
   const { format } = useCurrency();
-  const { stockFor } = useStock();
+  const { stockFor, isDynamic } = useStock();
   const [justAdded, setJustAdded] = useState(false);
 
   const category = getCategory(product.category);
   const off = discountPercent(product.price_usd, product.original_price_usd);
   // Live count when the admin has stocked this product, catalog number otherwise.
   const liveStock = stockFor(product);
-  const stock = stockLabel(liveStock);
-  const soldOut = liveStock <= 0;
+  const onDemand = isDynamic(product);
+  const soldOut = liveStock <= 0 && !onDemand;
+  const stock = onDemand && liveStock <= 0
+    ? { text: "On Demand", tone: "in" as const }
+    : stockLabel(liveStock);
 
   const handleAdd = (e: React.MouseEvent) => {
     e.preventDefault();

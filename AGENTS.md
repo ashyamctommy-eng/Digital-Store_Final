@@ -46,3 +46,16 @@ This is **Digital Hub Shop**, a static-exported digital products marketplace
   dispatch/email run after. Do not move that work before the response.
 - Run `npm run test:php` after touching anything in `server/api/`. The
   concurrency test is the one that matters most.
+
+### Hybrid SMS delivery
+
+- `server/api/lib/catalog.php` is GENERATED. Never edit it; run
+  `npm run sync:catalog` after changing delivery kinds or SMS specs in
+  `src/lib/products.ts`. `build:cpanel` does it automatically.
+- The browser must never tell the server how to fulfil an order — fulfilment
+  spends real money. Which products are SMS comes from the generated catalog.
+- SMS fulfilment order is fixed: pre-bought stock, then the on-demand provider,
+  then a recorded shortfall. Do not reorder it, and never call the provider
+  before an order is paid.
+- If you add a lib that calls a helper from another lib, add the `require_once`.
+  `npm run test:php:requires` catches this, and it has been a real bug twice.

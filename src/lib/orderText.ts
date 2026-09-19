@@ -11,6 +11,13 @@ export const USAGE_WARNINGS = [
   "REPORT DEAD ACCOUNTS WITHIN 24 HOURS FOR REPLACEMENT",
 ] as const;
 
+/** Extra guidance shown for orders that include an SMS number. */
+export const SMS_WARNINGS = [
+  "REQUEST THE CODE WITHIN A FEW MINUTES OF GETTING THE NUMBER",
+  "USE A VPN IN THE NUMBER'S COUNTRY OR THE SERVICE MAY REJECT IT",
+  "KEEP THE INBOX PAGE OPEN WHILE YOU WAIT FOR THE CODE",
+] as const;
+
 /**
  * Builds the downloadable `.txt` for an order.
  *
@@ -50,8 +57,27 @@ export function buildOrderText(
         out.push("-".repeat(46));
         current = cred.product_name;
       }
+
+      if (cred.kind === "sms") {
+        out.push(`Number:  ${cred.phone_number ?? cred.uid}`);
+        if (cred.inbox_url) out.push(`Inbox:   ${cred.inbox_url}`);
+        if (cred.notes) out.push(`Notes:   ${cred.notes}`);
+        if (cred.source) out.push(`Source:  ${cred.source === "dynamic" ? "on demand" : "pre-bought"}`);
+        if (cred.code) out.push(`Code:    ${cred.code}`);
+        out.push("");
+        continue;
+      }
+
       out.push(`${cred.uid} | ${cred.account_data}`);
     }
+  }
+
+  if (credentials.some((c) => c.kind === "sms")) {
+    out.push("SMS NUMBERS");
+    for (const warning of SMS_WARNINGS) {
+      out.push(`- ${warning}`);
+    }
+    out.push("");
   }
 
   out.push("");

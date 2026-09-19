@@ -12,6 +12,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/lib/http.php';
 require_once __DIR__ . '/lib/palplus.php';
 require_once __DIR__ . '/lib/nowpayments.php';
+require_once __DIR__ . '/lib/smsotp.php';
+require_once __DIR__ . '/lib/catalog.php';
 
 $config = load_config();
 apply_cors($config);
@@ -32,6 +34,15 @@ json_ok([
         'configured' => nowpayments_is_configured($config),
         'mode' => $mode,
         'has_ipn_secret' => trim((string) config_value($config, 'nowpayments.ipn_secret', '')) !== '',
+    ],
+    'smsotp' => [
+        'configured' => smsotp_is_configured($config),
+        'balance' => smsotp_is_configured($config) ? smsotp_balance_cached($config)['balance'] : 0,
+        'balance_ok' => smsotp_is_configured($config) ? smsotp_balance_cached($config)['ok'] : false,
+        'sms_products' => count(catalog_sms_product_ids()),
+    ],
+    'resend' => [
+        'configured' => trim((string) config_value($config, 'resend.api_key', '')) !== '',
     ],
     'public_base_url' => (string) config_value($config, 'public_base_url', ''),
     'data_dir_writable' => (bool) $writable,

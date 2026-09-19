@@ -18,6 +18,8 @@ require_once __DIR__ . '/../lib/dispatch.php';
 require_once __DIR__ . '/../lib/email.php';
 require_once __DIR__ . '/../lib/nowpayments.php';
 require_once __DIR__ . '/../lib/palplus.php';
+require_once __DIR__ . '/../lib/catalog.php';
+require_once __DIR__ . '/../lib/smsotp.php';
 
 $GLOBALS['__pass'] = 0;
 $GLOBALS['__fail'] = 0;
@@ -87,6 +89,81 @@ eq('host.example.com', $parsed[2]['uid'], 'colon format: first field becomes UID
 eq('available', $parsed[0]['status'], 'new units start available');
 eq(null, $parsed[0]['order_id'], 'new units are unbound');
 ok(str_starts_with($parsed[3]['uid'], 'UNIT-'), 'unstructured line gets a generated UID');
+
+/* ---------------------------------------------------------------- */
+section('SMS stock parsing (PHONE | INBOX_URL_OR_NOTES)');
+
+$sms = inventory_parse_lines(<<<TXT
++15551234567 | https://smsotp.net/inbox/abc123
++15559876543 | Keep the page open, code arrives in ~30s
++447700900123
++15550000000 | javascript:alert(1)
+not-a-number | https://example.com/x
+TXT, 'sms');
+
+// The junk line is dropped; the javascript: payload is neutralised.
+eq(4, count($sms), 'parses 4 usable SMS lines, dropping the non-number');
+eq('+15551234567', $sms[0]['phone'], 'phone is normalised with a leading +');
+eq('https://smsotp.net/inbox/abc123', $sms[0]['inbox_url'], 'a real link becomes the inbox url');
+eq('', $sms[0]['notes'], 'a link is not also stored as a note');
+eq('sms', $sms[0]['kind'], 'SMS units are tagged with their kind');
+eq('Keep the page open, code arrives in ~30s', $sms[1]['notes'], 'free text is kept as a note');
+eq('', $sms[1]['inbox_url'], 'free text is not mistaken for a link');
+eq('+447700900123', $sms[2]['phone'], 'a bare phone number with no link is still stocked');
+eq('', $sms[2]['inbox_url'], 'a bare number has no inbox url');
+eq('', $sms[3]['inbox_url'], 'a javascript: url is rejected');
+eq('javascript:alert(1)', $sms[3]['notes'], 'the rejected payload is kept only as inert text');
+
+eq('', inventory_sanitize_url('data:text/html,<script>'), 'data: urls are rejected');
+eq('', inventory_sanitize_url('  '), 'blank urls are rejected');
+eq('http://example.com/a', inventory_sanitize_url('http://example.com/a'), 'http is allowed');
+ok(inventory_sanitize_url('https://e.com/' . str_repeat('a', 900)) === '', 'over-long urls are rejected');
+eq('+15551234567', inventory_normalize_phone('+1 (555) 123-4567'), 'formatted numbers are cleaned');
+// "0712345678" is a valid pattern in several countries, so the country cannot
+// be inferred. It is kept as-is and flagged for review instead of being guessed.
+eq('+0712345678', inventory_normalize_phone('0712 345 678'), 'a local-format number is kept, not guessed');
+ok(inventory_phone_needs_review('+0712345678'), 'an ambiguous local number is flagged for review');
+ok(!inventory_phone_needs_review('+254712345678'), 'a proper country code is not flagged');
+ok(!inventory_phone_needs_review('+15551234567'), 'a US number is not flagged');
+
+/* ---------------------------------------------------------------- */
+section('Server-side catalog map');
+
+ok(catalog_is_sms('sms-whatsapp'), 'whatsapp product is recognised as SMS');
+ok(catalog_is_sms('sms-facebook'), 'facebook product is recognised as SMS');
+ok(!catalog_is_sms('vpn-nord-1y'), 'a VPN product is not SMS');
+eq('wa', catalog_sms_spec('sms-whatsapp')['service_id'], 'whatsapp maps to the wa service code');
+eq('tg', catalog_sms_spec('sms-telegram')['service_id'], 'telegram maps to tg');
+eq('fb', catalog_sms_spec('sms-facebook')['service_id'], 'facebook maps to fb');
+eq(null, catalog_sms_spec('not-a-product'), 'an unknown product has no spec');
+eq(null, catalog_sms_spec('vpn-nord-1y'), 'a non-SMS product has no spec');
+
+/* ---------------------------------------------------------------- */
+section('SMS dispatch prefers pre-bought stock');
+
+// Stock 2 numbers, order 2 -> both from static, provider never consulted.
+$add = inventory_add_units(
+    $config,
+    'sms-whatsapp',
+    "+15550000001 | https://inbox.test/1\n+15550000002 | https://inbox.test/2",
+    'sms'
+);
+eq(2, $add['available'], 'two SMS numbers are in stock');
+
+$claim = dispatch_claim_sms($config, 'sms-whatsapp', 2, 'ORDER_SMS_A');
+eq(2, count($claim['units']), 'both units are delivered');
+eq(0, $claim['shortfall'], 'no shortfall when stock covers the order');
+eq('static', $claim['units'][0]['source'], 'the units come from static stock');
+eq('+15550000001', $claim['units'][0]['phone_number'], 'the phone number is delivered');
+eq('https://inbox.test/1', $claim['units'][0]['inbox_url'], 'the inbox link is delivered');
+eq(0, inventory_count_available($config, 'sms-whatsapp'), 'static stock is consumed');
+
+// Static empty and no provider configured -> shortfall, never a silent success.
+$claim2 = dispatch_claim_sms($config, 'sms-whatsapp', 1, 'ORDER_SMS_B');
+eq(0, count($claim2['units']), 'nothing is delivered when stock is gone');
+eq(1, $claim2['shortfall'], 'the shortfall is reported');
+ok(is_string($claim2['dynamic_error']), 'the reason is recorded for the admin');
+eq('Product is not an SMS product.', dispatch_claim_sms($config, 'vpn-nord-1y', 1, 'X')['dynamic_error'] ?? null, 'non-SMS products are guarded');
 
 /* ---------------------------------------------------------------- */
 section('inventory_add_units');

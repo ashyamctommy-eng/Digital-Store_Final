@@ -16,6 +16,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/store.php';
+
 /** Directory holding one JSON file per product. */
 function inventory_dir(array $config): string
 {
@@ -97,18 +99,66 @@ function inventory_write(array $config, string $productId, array $data): bool
 }
 
 /**
- * Parses pasted credential lines into units.
+ * Accepts a value as an embeddable link, or returns "".
  *
- * Accepted shapes, one per line:
- *   UID|Password|Email          <- the documented format
+ * Inbox links are rendered in an iframe and used as an href, so anything that
+ * is not plain http(s) — `javascript:`, `data:`, a broken paste — is dropped at
+ * ingest rather than being stored and worrying about later.
+ */
+function inventory_sanitize_url($value): string
+{
+    $url = is_string($value) ? trim($value) : '';
+    if ($url === '' || strlen($url) > 800) {
+        return '';
+    }
+    if (!preg_match('#^https?://[^\s<>"]+$#i', $url)) {
+        return '';
+    }
+    return $url;
+}
+
+/**
+ * True when a number looks like a local-only format.
+ *
+ * "0712345678" is ambiguous — it is a valid pattern in Kenya, the UK and
+ * elsewhere — so the country cannot be inferred. These are still accepted (the
+ * admin may know better) but surfaced for review rather than silently shipped.
+ */
+function inventory_phone_needs_review(string $phone): bool
+{
+    return str_starts_with($phone, '+0');
+}
+
+/** Normalises a phone number to +<digits>. */
+function inventory_normalize_phone($value): string
+{
+    $digits = preg_replace('/[^\d+]/', '', is_string($value) ? $value : '') ?? '';
+    $digits = ltrim($digits, '+');
+    if ($digits === '') {
+        return '';
+    }
+    return '+' . $digits;
+}
+
+/**
+ * Parses pasted stock lines into units.
+ *
+ * Credentials (`$kind = "credentials"`), one per line:
+ *   UID|Password|Email
  *   UID|Password
  *   host:port:user:pass         <- proxies
  *   anything else               <- stored verbatim, UID generated
  *
+ * SMS (`$kind = "sms"`), one per line:
+ *   PHONE_NUMBER | INBOX_URL_OR_NOTES
+ *   PHONE_NUMBER
+ * Field two is treated as an inbox link when it looks like one, and as a note
+ * otherwise — so an admin can paste either without getting it wrong.
+ *
  * Blank lines and `#` comments are ignored. Duplicate lines within one batch
  * are dropped so a double paste does not create phantom stock.
  */
-function inventory_parse_lines(string $text): array
+function inventory_parse_lines(string $text, string $kind = 'credentials'): array
 {
     $units = [];
     $seen = [];
@@ -127,9 +177,38 @@ function inventory_parse_lines(string $text): array
         $fields = [];
         if (str_contains($line, '|')) {
             $fields = array_map('trim', explode('|', $line));
+        } elseif ($kind === 'sms') {
+            // A bare line is a phone number with no inbox link yet.
+            $fields = [$line];
         } elseif (substr_count($line, ':') >= 2 && !str_contains($line, ' ')) {
             // host:port:user:pass
             $fields = array_map('trim', explode(':', $line));
+        }
+
+        if ($kind === 'sms') {
+            $phone = inventory_normalize_phone($fields[0] ?? '');
+            if ($phone === '') {
+                continue;
+            }
+            $second = $fields[1] ?? '';
+            $inboxUrl = inventory_sanitize_url($second);
+
+            $units[] = [
+                'id' => bin2hex(random_bytes(8)),
+                'kind' => 'sms',
+                'uid' => $phone,
+                'phone' => $phone,
+                'inbox_url' => $inboxUrl,
+                // Anything that is not a usable link is kept as a plain note.
+                'notes' => $inboxUrl === '' ? substr($second, 0, 300) : '',
+                'secret' => $line,
+                'fields' => array_slice($fields, 0, 4),
+                'status' => 'available',
+                'order_id' => null,
+                'added_at' => gmdate('c'),
+                'sold_at' => null,
+            ];
+            continue;
         }
 
         $uid = $fields[0] ?? '';
@@ -139,6 +218,7 @@ function inventory_parse_lines(string $text): array
 
         $units[] = [
             'id' => bin2hex(random_bytes(8)),
+            'kind' => 'credentials',
             'uid' => substr($uid, 0, 120),
             'secret' => $line,
             'fields' => array_slice($fields, 0, 6),
@@ -157,9 +237,9 @@ function inventory_parse_lines(string $text): array
  *
  * @return array{added:int, duplicates:int, available:int}
  */
-function inventory_add_units(array $config, string $productId, string $text): array
+function inventory_add_units(array $config, string $productId, string $text, string $kind = 'credentials'): array
 {
-    $units = inventory_parse_lines($text);
+    $units = inventory_parse_lines($text, $kind);
     if (!$units) {
         return ['added' => 0, 'duplicates' => 0, 'available' => inventory_count_available($config, $productId)];
     }
@@ -262,11 +342,14 @@ function inventory_claim(array $config, string $productId, int $qty, string $ord
             $data['items'][$index]['order_id'] = $orderId;
             $data['items'][$index]['sold_at'] = $now;
 
-            $claimed[] = [
+            // Return the whole unit, not a narrowed copy — SMS units carry
+            // phone/inbox_url/notes that fulfilment needs.
+            $claimed[] = array_merge($item, [
                 'id' => $item['id'] ?? '',
                 'uid' => $item['uid'] ?? '',
                 'secret' => $item['secret'] ?? '',
-            ];
+                'kind' => $item['kind'] ?? 'credentials',
+            ]);
         }
 
         if ($claimed) {

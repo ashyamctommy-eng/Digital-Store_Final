@@ -46,6 +46,26 @@ return [
     ],
 
     // ---------------------------------------------------------------
+    // smsotp.net — on-demand SMS activations (hybrid SMS delivery)
+    // Dashboard: https://smsotp.net/profile  → API key
+    //
+    // Used ONLY as a fallback: pre-bought static stock is always tried first,
+    // and an activation is bought only when that stock is empty. Each
+    // activation spends real balance, and only ever after the order is paid.
+    // ---------------------------------------------------------------
+    'smsotp' => [
+        'api_key' => '',
+        'api_base' => 'https://smsotp.net/api/v1',
+        // Skip on-demand buying unless the balance is above this, so a nearly
+        // empty balance cannot produce half-fulfilled orders.
+        'min_balance' => 0.01,
+        // How long a fetched balance is reused. The storefront asks for stock
+        // counts on every page load; the authoritative check happens again at
+        // dispatch time. Set 0 to always fetch live.
+        'balance_cache_seconds' => 120,
+    ],
+
+    // ---------------------------------------------------------------
     // Resend — transactional email for credential delivery
     // Dashboard: https://resend.com/api-keys  (key starts with re_)
     // `from` must be a domain you have verified in Resend.

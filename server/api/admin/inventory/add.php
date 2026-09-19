@@ -14,6 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../lib/http.php';
 require_once __DIR__ . '/../../lib/store.php';
 require_once __DIR__ . '/../../lib/inventory.php';
+require_once __DIR__ . '/../../lib/catalog.php';
 
 $config = load_config();
 require_method('POST');
@@ -32,9 +33,14 @@ if (trim($text) === '') {
     json_error('No credential lines were provided.', 422, 'EMPTY_INPUT');
 }
 
+// SMS products are stocked as `PHONE | INBOX_URL_OR_NOTES`; everything else as
+// credential lines. The kind comes from the generated catalog, so the admin
+// does not have to pick a format.
+$kind = catalog_is_sms($productId) ? 'sms' : 'credentials';
+
 // Guard against a pasted novel filling the disk.
 $maxLines = (int) config_value($config, 'max_inventory_lines', 5000);
-$parsed = inventory_parse_lines($text);
+$parsed = inventory_parse_lines($text, $kind);
 if (count($parsed) > $maxLines) {
     json_error(
         'That is ' . count($parsed) . ' lines; the limit per upload is ' . $maxLines . '.',
@@ -47,7 +53,17 @@ if (count($parsed) > $maxLines) {
 // malformed lines before committing them to stock.
 $skipped = [];
 foreach ($parsed as $unit) {
-    if (count($unit['fields']) < 2) {
+    if ($kind === 'sms') {
+        // A number with neither a link nor a note is still fine — the admin may
+        // add the inbox later — but surface it so they can double-check.
+        // Flag anything the admin should double-check: no way to watch the
+        // inbox, or a number with no country code (e.g. 0712345678).
+        if (empty($unit['inbox_url']) && empty($unit['notes'])) {
+            $skipped[] = $unit['secret'];
+        } elseif (inventory_phone_needs_review((string) ($unit['phone'] ?? ''))) {
+            $skipped[] = $unit['secret'] . '   (add a country code, e.g. +254…)';
+        }
+    } elseif (count($unit['fields']) < 2) {
         $skipped[] = $unit['secret'];
     }
 }
@@ -57,15 +73,22 @@ if ($dryRun) {
         'product_id' => $productId,
         'dry_run' => true,
         'parsed' => count($parsed),
+        'kind' => $kind,
         'preview' => array_slice(array_map(
-            static fn ($u) => ['uid' => $u['uid'], 'secret' => $u['secret']],
+            static fn ($u) => [
+                'uid' => $u['uid'],
+                'secret' => $u['secret'],
+                'phone' => $u['phone'] ?? null,
+                'inbox_url' => $u['inbox_url'] ?? null,
+                'notes' => $u['notes'] ?? null,
+            ],
             $parsed
         ), 0, 10),
         'needs_review' => array_slice($skipped, 0, 20),
     ]);
 }
 
-$result = inventory_add_units($config, $productId, $text);
+$result = inventory_add_units($config, $productId, $text, $kind);
 
 store_log($config, 'admin.inventory.add', [
     'product_id' => $productId,
@@ -76,6 +99,7 @@ store_log($config, 'admin.inventory.add', [
 
 json_ok([
     'product_id' => $productId,
+    'kind' => $kind,
     'added' => $result['added'],
     'duplicates' => $result['duplicates'],
     'available' => $result['available'],

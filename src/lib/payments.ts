@@ -310,6 +310,37 @@ export interface DeliveredCredential {
   uid: string;
   /** Raw pasted line: UID|Password|Email */
   account_data: string;
+  /** "credentials" or "sms". */
+  kind?: "credentials" | "sms";
+  /** SMS only: the number the code will arrive on. */
+  phone_number?: string | null;
+  /** SMS only: pre-bought numbers carry a link to watch the inbox. */
+  inbox_url?: string | null;
+  notes?: string | null;
+  /** SMS only: "static" (pre-bought) or "dynamic" (bought on demand). */
+  source?: "static" | "dynamic" | null;
+  sms_phone_id?: string | null;
+  operator?: string | null;
+  /** SMS only: the verification code, once it has arrived. */
+  code?: string | null;
+}
+
+export interface SmsNumber {
+  uid: string;
+  phone_number: string;
+  inbox_url: string;
+  notes: string;
+  source: "static" | "dynamic";
+  code: string | null;
+  text: string | null;
+  pending: boolean;
+}
+
+export interface SmsStatusResponse {
+  order_id: string;
+  status: OrderStatus;
+  numbers: SmsNumber[];
+  dynamic_supported: boolean;
 }
 
 export interface CredentialsResponse {
@@ -342,11 +373,30 @@ export async function fetchCredentials(
   );
 }
 
+/**
+ * Live inbox feed for an order's SMS numbers.
+ *
+ * Pre-bought numbers answer straight away; on-demand activations are polled
+ * against the provider server-side, so this is safe to call on a timer.
+ */
+export async function fetchSmsStatus(
+  orderId: string,
+  token: string
+): Promise<ApiResult<SmsStatusResponse>> {
+  return getJson<SmsStatusResponse>(
+    `/orders/sms-status?order_id=${encodeURIComponent(orderId)}&token=${encodeURIComponent(token)}`
+  );
+}
+
 /** Public stock counts (COUNT of available inventory units). */
-export async function fetchStockCounts(): Promise<ApiResult<{
-  counts: Record<string, number>;
-  generated_at: string;
-}>> {
+export async function fetchStockCounts(): Promise<
+  ApiResult<{
+    counts: Record<string, number>;
+    /** SMS products with no static stock that can still be bought on demand. */
+    dynamic: string[];
+    generated_at: string;
+  }>
+> {
   return getJson(`/inventory/counts`);
 }
 

@@ -173,6 +173,37 @@ shortfall is recorded for the admin.
 Wallet and WhatsApp orders are **not** auto-fulfilled: the wallet has no
 server-side ledger, so those are delivered manually and the confirmation says so.
 
+### Hybrid SMS delivery
+
+Some products are phone numbers, not accounts. Those are marked
+`delivery_kind: "sms"` in the catalog and fulfilled by a fixed priority:
+
+| # | Source | When it is used |
+| --- | --- | --- |
+| 1 | **Pre-bought stock** | Always tried first — numbers the admin uploaded (`PHONE_NUMBER \| INBOX_URL_OR_NOTES`). |
+| 2 | **On-demand provider** ([smsotp.net](https://smsotp.net/api-support)) | Only when pre-bought stock is empty *and* the provider is configured *and* its balance is above `min_balance`. |
+| 3 | **Out of Stock** | Neither available: the storefront disables purchase instead of taking money it cannot fulfil. |
+
+The provider is never consulted before the order is paid, and never while
+pre-bought stock lasts. `npm run test:php:http` proves both: it asserts the
+provider is charged exactly zero times when static stock covers the order.
+
+Which products are SMS, and their service codes, are **generated from the
+TypeScript catalog** into `server/api/lib/catalog.php` by
+`scripts/sync-catalog.mjs` (run automatically by `build:cpanel`). The browser
+never tells the server how to fulfil an order, because fulfilment spends real
+money.
+
+On-demand numbers have no inbox link — the code lives with the provider — so
+`/api/orders/sms-status` polls the provider server-side and caches the code onto
+the order, and the Order Details page shows it in an embedded live feed.
+Pre-bought numbers carry an inbox URL, which gets an "Open Live Inbox" button and
+an optional embedded frame.
+
+> The embedded frame grants `allow-same-origin` **only to third-party hosts**,
+> since a real inbox needs its own cookies to show anything, and that flag is
+> only dangerous when the framed document shares our origin.
+
 ### Order history and credentials
 
 `/account/orders` lists orders from a local index (`dhs.orders.v1`), merged with
@@ -202,6 +233,8 @@ leaked order id does not expose credentials.
 | Browser persistence (`useSyncExternalStore`) | `src/lib/browserStore.ts` |
 | Payment API (PHP) | `server/api/` |
 | Inventory queue & dispatch | `server/api/lib/inventory.php`, `dispatch.php` |
+| SMS provider client | `server/api/lib/smsotp.php` |
+| Generated server catalog | `server/api/lib/catalog.php` (from `scripts/sync-catalog.mjs`) |
 | Credentials email (Resend) | `server/api/lib/email.php` |
 | Order History + details modal | `src/app/account/orders/`, `src/components/OrderDetailsModal.tsx` |
 | Admin stock console | `src/app/admin/inventory/` |
@@ -240,6 +273,10 @@ name automatically.
 - The admin stock console sits behind the `/admin` Google sign-in gate, so it
   needs both a signed-in admin and the `admin_api_key`.
 - Wallet and WhatsApp orders are fulfilled by hand.
+- The on-demand provider is a single point of failure for SMS when pre-bought
+  stock is empty; keep some static numbers for your best sellers.
+- Cancelling an unused on-demand number is not implemented — the provider's
+  documented API v1.0 has no cancel endpoint.
 - Orders are written to two places: the PHP ledger (authoritative for payment
   state) and Firestore (customer history). The ledger is what the UI trusts.
 - Wallet balances live in `localStorage` and are deliberately **not**

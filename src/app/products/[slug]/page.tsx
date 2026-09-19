@@ -24,7 +24,7 @@ export default function ProductDetailPage() {
 
   const { addToCart, setIsCartOpen } = useCart();
   const { format, currency } = useCurrency();
-  const { stockFor } = useStock();
+  const { stockFor, isDynamic } = useStock();
   const [quantity, setQuantity] = useState(1);
   const [added, setAdded] = useState(false);
 
@@ -58,8 +58,11 @@ export default function ProductDetailPage() {
   const category = getCategory(product.category);
   const off = discountPercent(product.price_usd, product.original_price_usd);
   const liveStock = stockFor(product);
-  const stock = stockLabel(liveStock);
-  const soldOut = liveStock <= 0;
+  const onDemand = isDynamic(product);
+  const soldOut = liveStock <= 0 && !onDemand;
+  const stock = onDemand && liveStock <= 0
+    ? { text: "On Demand", tone: "in" as const }
+    : stockLabel(liveStock);
   const total = product.price_usd * quantity;
 
   const handleBuyNow = () => {
