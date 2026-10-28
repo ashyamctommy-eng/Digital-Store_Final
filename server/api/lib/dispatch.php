@@ -49,7 +49,7 @@ function dispatch_normalise_items(array $rawItems): array
  *
  * @return array{units:array, shortfall:int, dynamic_error:?string}
  */
-function dispatch_claim_sms(array $config, string $productId, int $qty, string $orderId): array
+function dispatch_claim_sms(array $config, string $productId, int $qty, string $orderId, ?array $productSpec = null): array
 {
     $units = [];
     $dynamicError = null;
@@ -76,7 +76,7 @@ function dispatch_claim_sms(array $config, string $productId, int $qty, string $
     }
 
     // 2. On-demand activation.
-    $spec = catalog_sms_spec($productId);
+    $spec = $productSpec ?? catalog_sms_spec($productId);
     if ($spec === null || !smsotp_is_configured($config)) {
         return [
             'units' => $units,
@@ -152,82 +152,16 @@ function dispatch_claim_sms(array $config, string $productId, int $qty, string $
  *
  * @return array{units:array, shortfall:int, dynamic_error:?string}
  */
-function dispatch_claim_proxy(array $config, string $productId, int $qty, string $orderId): array
+function dispatch_claim_proxy(array $config, string $productId, int $qty, string $orderId, ?array $productSpec = null): array
 {
-    $spec = catalog_proxy_spec($productId);
+    $spec = $productSpec ?? catalog_proxy_spec($productId);
     if ($spec === null) {
         return ['units' => [], 'shortfall' => $qty, 'dynamic_error' => 'Product is not a proxy product.'];
     }
-
-    $perUnit = max(1, (int) ($spec['per_unit'] ?? 1));
-
-    // 1. Claim from the queue. Count first so only whole units are taken — a
-    //    claim of 7 leftover addresses would be sold as a 10-IP product.
-    $available = inventory_count_available($config, $productId);
-    $staticUnits = min($qty, intdiv($available, $perUnit));
-
-    $claimed = [];
-    if ($staticUnits > 0) {
-        $claim = inventory_claim($config, $productId, $staticUnits * $perUnit, $orderId);
-        foreach ($claim['units'] as $unit) {
-            $address = (string) ($unit['proxy'] ?? $unit['uid'] ?? '');
-            if ($address === '') {
-                continue;
-            }
-            // Credentials travel with the address: a proxy that needs auth is
-            // useless to the buyer without them, and the checker needs them too.
-            $claimed[] = [
-                'address' => $address,
-                'username' => (string) ($unit['username'] ?? ''),
-                'password' => (string) ($unit['password'] ?? ''),
-            ];
-        }
-    }
-
-    $units = [];
-    foreach (array_chunk($claimed, $perUnit) as $chunk) {
-        if (count($chunk) < $perUnit || count($units) >= $qty) {
-            // A racing order shrank the queue between counting and claiming;
-            // stop rather than deliver a partial unit.
-            break;
-        }
-
-        $addresses = [];
-        $auth = [];
-        foreach ($chunk as $entry) {
-            $addresses[] = $entry['address'];
-            if ($entry['username'] !== '' || $entry['password'] !== '') {
-                $auth[$entry['address']] = $entry['username'] . ':' . $entry['password'];
-            }
-        }
-
-        $units[] = [
-            'kind' => 'proxy',
-            'source' => 'static',
-            'product_id' => $productId,
-            'uid' => $addresses[0],
-            'secret' => implode(PHP_EOL, $addresses),
-            'proxies' => $addresses,
-            // Only addresses that actually have credentials appear here, so an
-            // empty map means "no auth needed" rather than "auth unknown".
-            'proxy_auth' => $auth,
-            'proxy_count' => count($addresses),
-            'notes' => '',
-        ];
-    }
-
-    $remaining = $qty - count($units);
-    if ($remaining <= 0) {
-        return ['units' => $units, 'shortfall' => 0, 'dynamic_error' => null];
-    }
-
-    // 2. No on-demand source: proxy addresses are stocked by hand, so anything
-    //    the queue cannot cover is a shortfall the admin has to fill. Selling
-    //    from a third-party pool was removed deliberately — see AGENTS.md.
     return [
-        'units' => $units,
-        'shortfall' => $remaining,
-        'dynamic_error' => 'Not enough addresses in stock. Add more in Stock & Credentials.',
+        'units' => [],
+        'shortfall' => max(1, $qty),
+        'dynamic_error' => 'Live GhostProxies credential delivery is not enabled until its generated response format is confirmed.',
     ];
 }
 
@@ -275,10 +209,11 @@ function dispatch_order(array $config, string $orderId): array
 
         // The delivery kind comes from the generated server-side catalog, not
         // from the browser — fulfilment decides how money is spent.
-        $kind = catalog_delivery_kind($productId);
+        $snapshot = is_array($item['catalog_snapshot'] ?? null) ? $item['catalog_snapshot'] : [];
+        $kind = (string) ($snapshot['delivery_kind'] ?? catalog_delivery_kind($productId) ?? 'credentials');
         $result = match ($kind) {
-            'sms' => dispatch_claim_sms($config, $productId, $qty, $orderId),
-            'proxy' => dispatch_claim_proxy($config, $productId, $qty, $orderId),
+            'sms' => dispatch_claim_sms($config, $productId, $qty, $orderId, is_array($snapshot['sms'] ?? null) ? $snapshot['sms'] : null),
+            'proxy' => dispatch_claim_proxy($config, $productId, $qty, $orderId, is_array($snapshot['proxy'] ?? null) ? $snapshot['proxy'] : null),
             default => array_merge(inventory_claim($config, $productId, $qty, $orderId), ['dynamic_error' => null]),
         };
 

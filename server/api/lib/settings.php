@@ -192,6 +192,14 @@ function settings_schema(): array
             'hint' => 'Numbers are only bought on demand when the balance is above this.',
         ],
 
+        // -------------------------------------------------- ghostproxies
+        'ghostproxies.api_key' => [
+            'group' => 'ghostproxies',
+            'label' => 'API key (x-api-key)',
+            'type' => 'secret',
+            'hint' => 'GhostProxies dashboard API credentials. Stored on this server and sent only in the x-api-key header.',
+        ],
+
         // ---------------------------------------------------- proxycheck
         'proxycheck.echo_url' => [
             'group' => 'proxycheck',
@@ -270,6 +278,7 @@ function settings_groups(): array
         'nowpayments' => ['label' => 'NOWPayments (crypto)', 'blurb' => 'Settles USD payments.'],
         'resend' => ['label' => 'Resend (order email)', 'blurb' => 'Delivers purchased credentials by email.'],
         'smsotp' => ['label' => 'SMS provider', 'blurb' => 'Supplies phone numbers on demand when your own stock runs out.'],
+        'ghostproxies' => ['label' => 'GhostProxies', 'blurb' => 'Provider API access for proxy account status, pools, and order provisioning.'],
         'proxycheck' => ['label' => 'Proxy checker', 'blurb' => 'Tests uploaded proxy addresses before they are sold.'],
         'advanced' => ['label' => 'Advanced', 'blurb' => 'Change these only if you know why.'],
     ];

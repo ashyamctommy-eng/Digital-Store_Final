@@ -1,6 +1,7 @@
 "use client";
 
 import { API_BASE } from "./payments";
+import type { Product } from "./products";
 
 /**
  * Admin API client.
@@ -42,6 +43,7 @@ interface ApiResult<T> {
   error?: string;
   errorCode?: string;
   status?: number;
+  fields?: Record<string, string>;
 }
 
 async function adminFetch<T>(
@@ -66,6 +68,7 @@ async function adminFetch<T>(
         status: res.status,
         error: json?.error ?? `Request failed (${res.status})`,
         errorCode: json?.errorCode,
+        fields: json?.fields,
       };
     }
     return { ok: true, status: res.status, data: json as T };
@@ -98,7 +101,7 @@ export interface InventoryListResponse {
     available: number;
     sold: number;
     total: number;
-    sample: { uid: string; secret: string }[];
+    sample: { unit_id: string; uid: string; kind: string }[];
     updated_at: string | null;
   }[];
   totals: { products: number; available: number; sold: number };
@@ -144,6 +147,33 @@ export function adminDeleteUnit(
   return adminFetch("/admin/inventory/delete", {
     method: "POST",
     body: JSON.stringify({ productId, unitId }),
+  });
+}
+
+export interface AdminCatalogResponse {
+  products: (Product & { active: boolean; updated_at?: string })[];
+}
+
+export function adminListCatalog(): Promise<ApiResult<AdminCatalogResponse>> {
+  return adminFetch("/admin/catalog", { method: "GET" });
+}
+
+export function adminSaveCatalogProduct(
+  product: Product
+): Promise<ApiResult<{ product: Product & { active: boolean }; products: AdminCatalogResponse["products"] }>> {
+  return adminFetch("/admin/catalog", {
+    method: "POST",
+    body: JSON.stringify({ action: "save", product }),
+  });
+}
+
+export function adminSetCatalogActive(
+  productId: string,
+  active: boolean
+): Promise<ApiResult<{ product_id: string; active: boolean; products: AdminCatalogResponse["products"] }>> {
+  return adminFetch("/admin/catalog", {
+    method: "POST",
+    body: JSON.stringify({ action: active ? "activate" : "delete", productId }),
   });
 }
 
@@ -220,12 +250,29 @@ export interface IntegrationTestResult {
 
 /** Asks the live provider whether a credential actually works. */
 export function adminTestIntegration(
-  integration: "palplus" | "nowpayments" | "resend" | "smsotp" | "proxycheck"
+  integration: "palplus" | "nowpayments" | "resend" | "smsotp" | "proxycheck" | "ghostproxies"
 ): Promise<ApiResult<IntegrationTestResult>> {
   return adminFetch("/admin/settings/test", {
     method: "POST",
     body: JSON.stringify({ integration }),
   });
+}
+
+export interface GhostProxiesResponse {
+  resource: string;
+  status: number;
+  data: unknown;
+}
+
+export function adminGhostProxies(
+  resource: "stats" | "settings" | "pools" | "countries" | "locations" | "asn" | "reseller",
+  options: { country?: string; type?: string; state?: string } = {}
+): Promise<ApiResult<GhostProxiesResponse>> {
+  const query = new URLSearchParams({ resource });
+  if (options.country) query.set("country", options.country);
+  if (options.type) query.set("type", options.type);
+  if (options.state) query.set("state", options.state);
+  return adminFetch(`/admin/ghostproxies?${query.toString()}`, { method: "GET" });
 }
 
 /* ------------------------------ proxy checker ---------------------------- */

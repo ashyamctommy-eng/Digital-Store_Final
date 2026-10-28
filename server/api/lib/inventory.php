@@ -438,6 +438,17 @@ function inventory_delete_unit(array $config, string $productId, string $unitId)
 {
     return inventory_with_lock($config, $productId, function () use ($config, $productId, $unitId) {
         $data = inventory_read($config, $productId);
+        $targetIsAvailable = false;
+        foreach ($data['items'] as $item) {
+            if (($item['id'] ?? '') === $unitId) {
+                $targetIsAvailable = ($item['status'] ?? '') === 'available';
+                break;
+            }
+        }
+        if (!$targetIsAvailable) {
+            return false;
+        }
+
         $before = count($data['items']);
         $data['items'] = array_values(array_filter(
             $data['items'],
@@ -469,7 +480,11 @@ function inventory_summary(array $config, int $sampleSize = 5): array
             if (($item['status'] ?? '') === 'available') {
                 $available++;
                 if (count($sample) < $sampleSize) {
-                    $sample[] = ['uid' => $item['uid'] ?? '', 'secret' => $item['secret'] ?? ''];
+                    $sample[] = [
+                        'unit_id' => (string) ($item['id'] ?? ''),
+                        'uid' => (string) ($item['uid'] ?? ''),
+                        'kind' => (string) ($item['kind'] ?? 'credentials'),
+                    ];
                 }
             } elseif (($item['status'] ?? '') === 'sold') {
                 $sold++;

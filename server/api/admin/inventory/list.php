@@ -13,13 +13,17 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../lib/http.php';
 require_once __DIR__ . '/../../lib/store.php';
 require_once __DIR__ . '/../../lib/inventory.php';
+require_once __DIR__ . '/../../lib/catalog.php';
 
 $config = load_config();
 apply_cors($config);
 require_method('GET');
 require_admin($config);
 
-$rows = inventory_summary($config);
+$rows = array_values(array_filter(
+    inventory_summary($config),
+    static fn (array $row): bool => !catalog_is_proxy((string) ($row['product_id'] ?? ''))
+));
 
 $available = 0;
 $sold = 0;

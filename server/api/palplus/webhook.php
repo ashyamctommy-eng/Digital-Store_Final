@@ -82,21 +82,10 @@ $providerStatus = palplus_map_status($authoritative['status'] ?? null);
 $receipt = $authoritative['mpesa_receipt'] ?? null;
 $paidAmount = (int) ($authoritative['amount'] ?? 0);
 
-// What the order SHOULD have cost, recomputed from the catalog rather than read
-// back from the record. Trusting `$order['amount_kes']` would compare the paid
-// amount against a number that originated in the request body — the check would
-// pass for any amount a buyer chose. Falls back to the stored figure only when
-// the cart cannot be priced (an order written before pricing moved server-side).
-$catalogAmount = pricing_total_kes($config, dispatch_normalise_items($order['items'] ?? []));
-$expectedAmount = $catalogAmount ?? (int) ($order['amount_kes'] ?? 0);
-
-if ($catalogAmount !== null && $catalogAmount !== (int) ($order['amount_kes'] ?? 0)) {
-    store_log($config, 'palplus.webhook.ledger_amount_drift', [
-        'order_id' => $orderId,
-        'ledger_amount_kes' => (int) ($order['amount_kes'] ?? 0),
-        'catalog_amount_kes' => $catalogAmount,
-    ]);
-}
+// The ledger amount was computed by the server when checkout created the order.
+// Repricing against today's catalog would break a pending payment after an
+// admin price edit, even though the buyer paid the original server quote.
+$expectedAmount = (int) ($order['amount_kes'] ?? 0);
 
 // Guard against a tampered or mismatched amount.
 if ($providerStatus === 'paid' && $expectedAmount > 0 && $paidAmount !== $expectedAmount) {

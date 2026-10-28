@@ -16,6 +16,7 @@ const navItems: { href: string; label: string; icon: IconName }[] = [
   { href: "/admin/users/", label: "Customers", icon: "user" },
   { href: "/admin/configurations/", label: "Configurations", icon: "filter" },
   { href: "/admin/integrations/", label: "Integrations", icon: "globe" },
+  { href: "/admin/ghostproxies/", label: "GhostProxies", icon: "globe" },
   { href: "/admin/settings/", label: "Store Settings", icon: "filter" },
 ];
 

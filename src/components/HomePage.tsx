@@ -8,7 +8,6 @@ import ProductGrid from "./ProductGrid";
 import Icon from "./ui/Icon";
 import { useCatalog } from "@/context/CatalogContext";
 import { categories, getCategory } from "@/lib/categories";
-import { products as allProducts } from "@/lib/products";
 import { DELIVERY, SUPPORT } from "@/lib/config";
 
 /**
@@ -17,7 +16,7 @@ import { DELIVERY, SUPPORT } from "@/lib/config";
  * taps a tag / "See more".
  */
 export default function HomePage() {
-  const { isFiltering, results, query, category, tag, featured, reset } = useCatalog();
+  const { isFiltering, results, query, category, tag, featured, products, reset } = useCatalog();
 
   const activeCategory = category ? getCategory(category) : null;
 
@@ -129,7 +128,7 @@ export default function HomePage() {
           {/* Category sections */}
           <div id="all-categories" className="mt-10 space-y-10">
             {categories.map((cat) => {
-              const list = allProducts.filter((p) => p.category === cat.id);
+              const list = products.filter((p) => p.category === cat.id);
               return (
                 <CategorySection key={cat.id} category={cat} products={list} />
               );

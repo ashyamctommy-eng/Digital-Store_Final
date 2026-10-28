@@ -76,11 +76,9 @@ if ($status === 'paid' && $paymentId !== '') {
     }
 }
 
-// Amount check. Without this, an invoice raised for any amount at all settles
-// as paid: the signature proves the callback is genuinely from NOWPayments, not
-// that the right amount was paid.
-$expectedUsd = pricing_total_usd(dispatch_normalise_items($order['items'] ?? []))
-    ?? (float) ($order['amount_usd'] ?? 0);
+// Amount check against the server-calculated checkout snapshot. The current
+// catalog may have changed since this invoice was created.
+$expectedUsd = (float) ($order['amount_usd'] ?? 0);
 $settledPrice = $verified['price_amount'] ?? $priceAmount;
 
 if (

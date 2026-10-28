@@ -22,6 +22,7 @@ require_once __DIR__ . '/../lib/store.php';
 require_once __DIR__ . '/../lib/inventory.php';
 require_once __DIR__ . '/../lib/dispatch.php';
 require_once __DIR__ . '/../lib/catalog.php';
+require_once __DIR__ . '/../lib/pricing.php';
 
 $config = ['data_dir' => $argv[1]];
 
@@ -36,6 +37,10 @@ $config = ['data_dir' => $argv[1]];
 ];
 
 $kind = catalog_delivery_kind($productId) ?? 'credentials';
+$items = pricing_describe_items([
+    ['product_id' => $productId, 'name' => 'Seeded Product', 'quantity' => max(1, $orderQty)],
+]);
+$amountUsd = pricing_total_usd($items) ?? 0.0;
 
 if ($stockUnits > 0) {
     $lines = [];
@@ -55,12 +60,10 @@ store_write_order($config, [
     'order_token' => $token,
     'gateway' => 'nowpayments',
     'currency' => 'USD',
-    'amount_usd' => 4.50,
+    'amount_usd' => $amountUsd,
     'status' => 'pending',
     'buyer_email' => $email,
-    'items' => [
-        ['product_id' => $productId, 'name' => 'Seeded Product', 'quantity' => max(1, $orderQty)],
-    ],
+    'items' => $items,
 ]);
 
 echo json_encode([

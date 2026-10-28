@@ -140,7 +140,7 @@ return [
     'admin_api_key' => 'test-admin-key',
     'inventory_drives_stock' => true,
     'palplus' => ['api_key' => 'pk_test_fake', 'sandbox_base' => 'https://sandbox.palplus.invalid/v1'],
-    // A fake key so the pricing checks are reachable: the `configured` gate runs
+    // A fake key so the pricing checks are reachable: the configured gate runs
     // before them by design, so an unconfigured gateway would mask the result.
     'nowpayments' => ['api_key' => 'np_test_fake', 'ipn_secret' => 'ipn-secret-123', 'api_base' => 'https://api.nowpayments.invalid/v1'],
     'resend' => ['api_key' => '', 'from' => 'Test <t@example.test>'],
@@ -391,110 +391,30 @@ check "unmatched reference is acknowledged" "200" "$CODE"
 check_contains "unmatched reference is ignored" 'unknown order' "$(cat /tmp/dhs-r.json)"
 
 echo
-echo -e "\033[1mProxy delivery: addresses come from uploaded stock\033[0m"
+echo -e "\033[1mProxy orders stay unavailable until live credentials can be delivered\033[0m"
 
-# proxy-dc-03 is a "25 IPs" product: 50 addresses is 2 whole units.
+# Legacy proxy stock is deliberately ignored; provider-backed fulfillment is not
+# enabled until the generated credential contract is confirmed.
 SEED=$("$PHP_BIN" "$API_DIR/tests/seed.php" "$DATA_DIR" "proxy-dc-03" "ORDER_proxy-dc-03_1800000000001" "tok_proxy_static" 50 1 "proxy@example.test")
-check_contains "seeded 50 addresses" '"available":50' "$SEED"
-check_contains "recognised as a proxy product" '"kind":"proxy"' "$SEED"
-
-CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' "$BASE/inventory/counts")
-check_contains "counts include the proxy product" '"proxy-dc-03":50' "$(cat /tmp/dhs-r.json)"
-check_absent "proxy products are never offered on demand" '"proxy-' "$(cat /tmp/dhs-r.json | sed 's/.*"dynamic"://')"
+check_contains "legacy proxy stock can exist in test data" '"available":50' "$SEED"
+check_contains "the product is recognised as a proxy" '"kind":"proxy"' "$SEED"
+check_absent "public stock does not expose proxy inventory" '"proxy-dc-03"' "$(curl -s "$BASE/inventory/counts")"
+check_absent "proxy products are never offered on demand" '"proxy-' "$(curl -s "$BASE/inventory/counts" | sed 's/.*"dynamic"://')"
 
 CODE=$(fire_paid_ipn "ORDER_proxy-dc-03_1800000000001")
 check "signed IPN for a proxy order -> 200" "200" "$CODE"
 sleep 0.6
-
 CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' \
   "$BASE/orders/credentials?order_id=ORDER_proxy-dc-03_1800000000001&token=tok_proxy_static")
-check "proxy credentials -> 200" "200" "$CODE"
-check_contains "delivered as a proxy unit" '"kind":"proxy"' "$(cat /tmp/dhs-r.json)"
-check_contains "came from pre-bought stock" '"source":"static"' "$(cat /tmp/dhs-r.json)"
-check_contains "reports 25 addresses for the unit" '"proxy_count":25' "$(cat /tmp/dhs-r.json)"
+check "paid proxy order can be inspected -> 200" "200" "$CODE"
+check_contains "proxy credentials are not falsely delivered" '"credentials":[]' "$(cat /tmp/dhs-r.json)"
+check_contains "proxy fulfillment reports a shortfall" '"proxy-dc-03":1' "$(cat /tmp/dhs-r.json)"
 
-ADDRESSES=$("$PHP_BIN" -r '$d = json_decode((string) file_get_contents($argv[1]), true); $u = $d["credentials"][0] ?? []; echo count($u["proxies"] ?? []);' /tmp/dhs-r.json)
-check "one unit is exactly 25 addresses" "25" "$ADDRESSES"
-
-FIRST_ADDRESS=$("$PHP_BIN" -r '$d = json_decode((string) file_get_contents($argv[1]), true); echo $d["credentials"][0]["proxies"][0] ?? "";' /tmp/dhs-r.json)
-check "addresses are formatted IP:PORT" "203.0.9.1:9000" "$FIRST_ADDRESS"
-check_contains "the remaining unit is still in stock" '"proxy-dc-03":25' "$(curl -s "$BASE/inventory/counts")"
-
-echo
-echo -e "\033[1mProxy delivery: a partial unit is never sold\033[0m"
-
-# proxy-9p-10 is "10 IPs". Seven addresses cannot make a whole unit, so the order
-# must deliver nothing rather than shipping 7 addresses for the price of 10.
-"$PHP_BIN" "$API_DIR/tests/seed.php" "$DATA_DIR" "proxy-9p-10" "ORDER_proxy-9p-10_1800000000010" "tok_proxy_partial" 7 1 "partial@example.test" >/dev/null
-fire_paid_ipn "ORDER_proxy-9p-10_1800000000010" >/dev/null
-sleep 0.6
-
-CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' \
-  "$BASE/orders/credentials?order_id=ORDER_proxy-9p-10_1800000000010&token=tok_proxy_partial")
-check "partial-stock order credentials -> 200" "200" "$CODE"
-check_contains "delivered nothing" '"credentials":[]' "$(cat /tmp/dhs-r.json)"
-check_contains "recorded a shortfall" '"proxy-9p-10":1' "$(cat /tmp/dhs-r.json)"
-check_contains "the stranded addresses stay in stock" '"proxy-9p-10":7' "$(curl -s "$BASE/inventory/counts")"
-
-echo
-echo -e "\033[1mProxy delivery: an empty queue is Out of Stock\033[0m"
-
-"$PHP_BIN" "$API_DIR/tests/seed.php" "$DATA_DIR" "proxy-mobile-02" "ORDER_proxy-mobile-02_1800000000020" "tok_proxy_empty" 0 1 "empty@example.test" >/dev/null
-fire_paid_ipn "ORDER_proxy-mobile-02_1800000000020" >/dev/null
-sleep 0.6
-
-CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' \
-  "$BASE/orders/credentials?order_id=ORDER_proxy-mobile-02_1800000000020&token=tok_proxy_empty")
-check "empty-queue order credentials -> 200" "200" "$CODE"
-check_contains "delivered nothing" '"credentials":[]' "$(cat /tmp/dhs-r.json)"
-check_contains "recorded the shortfall" '"proxy-mobile-02":1' "$(cat /tmp/dhs-r.json)"
-
-echo
-echo -e "\033[1mProxy delivery: quantity multiplies the unit\033[0m"
-
-# 2 units of a 10-IP product = 20 addresses, all distinct.
-"$PHP_BIN" "$API_DIR/tests/seed.php" "$DATA_DIR" "proxy-9p-10" "ORDER_proxy-9p-10_1800000000030" "tok_proxy_qty" 20 2 "qty@example.test" >/dev/null
-fire_paid_ipn "ORDER_proxy-9p-10_1800000000030" >/dev/null
-sleep 0.8
-
-CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' \
-  "$BASE/orders/credentials?order_id=ORDER_proxy-9p-10_1800000000030&token=tok_proxy_qty")
-check "quantity-2 proxy credentials -> 200" "200" "$CODE"
-UNITS=$("$PHP_BIN" -r '$d = json_decode((string) file_get_contents($argv[1]), true); $n = 0; foreach ($d["credentials"] ?? [] as $u) { if (($u["kind"] ?? "") === "proxy") $n++; } echo $n;' /tmp/dhs-r.json)
-check "an order for 2 units delivered 2 units" "2" "$UNITS"
-QTY_ADDRESSES=$("$PHP_BIN" -r '$d = json_decode((string) file_get_contents($argv[1]), true); $n = 0; foreach ($d["credentials"] ?? [] as $u) { $n += count($u["proxies"] ?? []); } echo $n;' /tmp/dhs-r.json)
-check "10 addresses per unit x 2 units = 20" "20" "$QTY_ADDRESSES"
-DISTINCT=$("$PHP_BIN" -r '$d = json_decode((string) file_get_contents($argv[1]), true); $a = []; foreach ($d["credentials"] ?? [] as $u) { foreach ($u["proxies"] ?? [] as $x) { $a[$x] = 1; } } echo count($a);' /tmp/dhs-r.json)
-check "no address was delivered twice" "20" "$DISTINCT"
-
-echo -e "\033[1mProxy stock upload (admin)\033[0m"
-
-# All four accepted formats, plus two lines that must be refused.
 CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/inventory/add" \
   -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
-  -d '{"productId":"proxy-dc-03","text":"203.0.20.1:8080\nuser1:pass1@203.0.20.2:8080\n203.0.20.3:8080:user3:pass3\n203.0.20.4:8080 | user4:pass4\n10.0.0.1:8080\nnot-an-address\n"}')
-check "POST /api/admin/inventory/add (proxy) -> 200" "200" "$CODE"
-check_contains "detects the proxy stock format" '"kind":"proxy"' "$(cat /tmp/dhs-r.json)"
-check_contains "stored all four accepted formats" '"added":4' "$(cat /tmp/dhs-r.json)"
-check_contains "rejected the private address" '10.0.0.1:8080' "$(cat /tmp/dhs-r.json)"
-check_contains "rejected the malformed line" 'not-an-address' "$(cat /tmp/dhs-r.json)"
-
-# The credentials must survive the upload, not just the address.
-LISTED=$("$PHP_BIN" -r '
-  require $argv[1] . "/lib/http.php";
-  require $argv[1] . "/lib/store.php";
-  require $argv[1] . "/lib/inventory.php";
-  $config = ["data_dir" => $argv[2]];
-  $items = inventory_read($config, "proxy-dc-03")["items"] ?? [];
-  $out = [];
-  foreach (array_slice($items, -4) as $u) {
-      $out[] = $u["uid"] . "|" . ($u["username"] ?? "") . ":" . ($u["password"] ?? "");
-  }
-  echo implode(" ", $out);' "$API_DIR" "$DATA_DIR")
-check "credentials-first format kept its user/pass" "yes" "$(case "$LISTED" in *"203.0.20.2:8080|user1:pass1"*) echo yes;; *) echo "no ($LISTED)";; esac)"
-check "credentials-last format kept its user/pass" "yes" "$(case "$LISTED" in *"203.0.20.3:8080|user3:pass3"*) echo yes;; *) echo "no ($LISTED)";; esac)"
-check "pipe format kept its user/pass" "yes" "$(case "$LISTED" in *"203.0.20.4:8080|user4:pass4"*) echo yes;; *) echo "no ($LISTED)";; esac)"
-check "a bare host:port has no credentials" "yes" "$(case "$LISTED" in *"203.0.20.1:8080|:"*) echo yes;; *) echo "no ($LISTED)";; esac)"
+  -d '{"productId":"proxy-dc-03","text":"203.0.20.1:8080\nuser1:pass1@203.0.20.2:8080\n"}')
+check "manual proxy stock upload is blocked -> 422" "422" "$CODE"
+check_contains "manual uploads are explicitly disabled" '"errorCode":"PROXY_STATIC_STOCK_DISABLED"' "$(cat /tmp/dhs-r.json)"
 
 echo
 echo
@@ -609,9 +529,8 @@ echo -e "\033[1mChecking must not weaken what can be sold\033[0m"
 CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/inventory/add" \
   -H 'x-admin-key: test-admin-key' -H 'Content-Type: application/json' \
   -d '{"productId":"proxy-mobile-02","text":"127.0.0.1:8080\n"}')
-check "POST /api/admin/inventory/add -> 200" "200" "$CODE"
-check_contains "a loopback address is still refused for stock" '127.0.0.1:8080' "$(cat /tmp/dhs-r.json)"
-check_contains "and nothing was added" '"added":0' "$(cat /tmp/dhs-r.json)"
+check "manual proxy stock upload stays blocked -> 422" "422" "$CODE"
+check_contains "the stock endpoint refuses all proxy uploads" '"errorCode":"PROXY_STATIC_STOCK_DISABLED"' "$(cat /tmp/dhs-r.json)"
 
 echo
 echo
@@ -731,20 +650,17 @@ echo -e "\033[1mPrice tampering\033[0m"
 # could pay whatever they liked. NOWPayments had no amount check at all. These
 # tests pin the replacement: the charge comes from the server's own catalog.
 
-# A cart of proxy-dc-03 costs $17 in the catalog.
-CHEAP_ORDER="ORDER_proxy-dc-03_tamper1"
+# A cart of vpn-nord-1y costs $34.50 in the catalog.
+CHEAP_ORDER="ORDER_vpn-nord-1y_tamper1"
 "$PHP_BIN" -r '
   require $argv[1] . "/lib/http.php";
   require $argv[1] . "/lib/store.php";
-  require $argv[1] . "/lib/dispatch.php";
   $config = ["data_dir" => $argv[2]];
-  $num = 0;
-  inventory_add_units($config, "proxy-dc-03", "203.0.11.1:9000:u:p", $num);
   store_write_order($config, [
     "order_id" => $argv[3], "order_token" => "tok_tamper", "status" => "pending",
-    "gateway" => "nowpayments", "amount_usd" => 17, "currency" => "USD",
+    "gateway" => "nowpayments", "amount_usd" => 34.50, "currency" => "USD",
     "buyer_email" => "tamper@example.test",
-    "items" => [["product_id" => "proxy-dc-03", "name" => "Datacenter Proxies", "quantity" => 1]],
+    "items" => [["product_id" => "vpn-nord-1y", "name" => "NordVPN 1 Year", "quantity" => 1]],
   ]);' "$API_DIR" "$DATA_DIR" "$CHEAP_ORDER"
 
 # The provider reports a price that does not match the catalog.
@@ -765,16 +681,16 @@ check "nothing is delivered for an underpaid order" "0" "$NO_GOODS"
 
 # Paying the catalog price still settles it, so the check is not simply refusing
 # every crypto order.
-HONEST_ORDER="ORDER_proxy-dc-03_honest1"
+HONEST_ORDER="ORDER_vpn-nord-1y_honest1"
 "$PHP_BIN" -r '
   require $argv[1] . "/lib/http.php";
   require $argv[1] . "/lib/store.php";
   $config = ["data_dir" => $argv[2]];
   store_write_order($config, [
     "order_id" => $argv[3], "order_token" => "tok_honest", "status" => "pending",
-    "gateway" => "nowpayments", "amount_usd" => 17, "currency" => "USD",
+    "gateway" => "nowpayments", "amount_usd" => 34.50, "currency" => "USD",
     "buyer_email" => "honest@example.test",
-    "items" => [["product_id" => "proxy-dc-03", "name" => "Datacenter Proxies", "quantity" => 1]],
+    "items" => [["product_id" => "vpn-nord-1y", "name" => "NordVPN 1 Year", "quantity" => 1]],
   ]);' "$API_DIR" "$DATA_DIR" "$HONEST_ORDER"
 
 fire_paid_ipn "$HONEST_ORDER" >/dev/null
@@ -787,7 +703,7 @@ check "the correct amount still settles" "paid" "$HONEST_STATE"
 
 # The checkout endpoints refuse a cart priced differently from the catalog,
 # BEFORE they talk to a provider or record anything.
-TAMPER_CART='{"orderId":"ORDER_tamper_1","accountReference":"DHSTAMPER001","amountKes":1,"phone":"0712345678","items":[{"product_id":"proxy-dc-03","name":"Datacenter Proxies","quantity":1}]}'
+TAMPER_CART='{"orderId":"ORDER_tamper_1","accountReference":"DHSTAMPER001","amountKes":1,"phone":"0712345678","items":[{"product_id":"vpn-nord-1y","name":"NordVPN 1 Year","quantity":1}]}'
 CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/palplus/initiate" \
   -H 'Content-Type: application/json' -d "$TAMPER_CART")
 check "Palplus: a one-shilling cart is refused" "409" "$CODE"
@@ -797,7 +713,7 @@ check_absent "and no order was recorded" "ORDER_tamper_1" \
 
 CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/nowpayments/create-invoice" \
   -H 'Content-Type: application/json' \
-  -d '{"orderId":"ORDER_tamper_2","priceUsd":0.01,"items":[{"product_id":"proxy-dc-03","name":"Datacenter Proxies","quantity":1}]}')
+  -d '{"orderId":"ORDER_tamper_2","priceUsd":0.01,"items":[{"product_id":"vpn-nord-1y","name":"NordVPN 1 Year","quantity":1}]}')
 check "NOWPayments: a one-cent invoice is refused" "409" "$CODE"
 check_contains "with a price-mismatch code" '"errorCode":"PRICE_MISMATCH"' "$(cat /tmp/dhs-r.json)"
 
@@ -818,7 +734,7 @@ check_contains "as an empty cart" '"errorCode":"EMPTY_CART"' "$(cat /tmp/dhs-r.j
 # unreachable test gateway, which is a different, expected error).
 CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/nowpayments/create-invoice" \
   -H 'Content-Type: application/json' \
-  -d '{"orderId":"ORDER_tamper_5","priceUsd":17.00,"items":[{"product_id":"proxy-dc-03","name":"Datacenter Proxies","quantity":1}]}')
+  -d '{"orderId":"ORDER_tamper_5","priceUsd":34.50,"items":[{"product_id":"vpn-nord-1y","name":"NordVPN 1 Year","quantity":1}]}')
 check_absent "the matching price is not refused as tampering" '"errorCode":"PRICE_MISMATCH"' "$(cat /tmp/dhs-r.json)"
 
 echo

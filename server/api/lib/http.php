@@ -46,6 +46,7 @@ function load_config(): array
     }
 
     $config = require $path;
+    $GLOBALS['__store_config'] = $config;
     return $config;
 }
 

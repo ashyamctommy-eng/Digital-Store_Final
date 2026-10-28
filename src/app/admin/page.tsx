@@ -1,78 +1,233 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { formatPrice } from "@/lib/currency";
-import { adminListOrders } from "@/lib/adminApi";
-import { toAdminOrderView, type AdminOrderView } from "@/lib/adminOrders";
+import {
+  adminListOrders,
+  adminListStock,
+  getAdminKey,
+  setAdminKey,
+  type AdminOrdersResponse,
+  type InventoryListResponse,
+} from "@/lib/adminApi";
+import { toAdminOrderView } from "@/lib/adminOrders";
+import { products } from "@/lib/products";
+
+const LOW_STOCK_LIMIT = 10;
 
 export default function AdminDashboard() {
-  const [stats, setStats] = useState([
-    { label: "Revenue", value: "—", color: "text-green-600 bg-green-50", icon: "M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" },
-    { label: "Total Orders", value: "0", color: "text-blue-600 bg-blue-50", icon: "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" },
-    { label: "Customers", value: "—", color: "text-purple-600 bg-purple-50", icon: "M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" },
-    { label: "Awaiting Delivery", value: "0", color: "text-amber-600 bg-amber-50", icon: "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" },
-  ]);
-  const [recentOrders, setRecentOrders] = useState<AdminOrderView[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [unlocked, setUnlocked] = useState(false);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [orders, setOrders] = useState<AdminOrdersResponse | null>(null);
+  const [stock, setStock] = useState<InventoryListResponse | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
-  // Reads the real ledger through the admin API, not a browser-written copy:
-  // the revenue and order figures have to come from the same records that
-  // fulfilment acted on.
   useEffect(() => {
-    async function load() {
-      const res = await adminListOrders({ limit: 10 });
-      if (!res.ok || !res.data) {
-        setLoading(false);
-        return;
-      }
-      const rows = res.data.orders.map(toAdminOrderView);
-      setRecentOrders(rows);
-      const pending = res.data.totals.counts.pending ?? 0;
-      setStats((p) => [
-        { ...p[0], value: formatPrice(res.data!.totals.revenue_usd, "USD") },
-        { ...p[1], value: `${res.data!.totals.scanned}` },
-        p[2],
-        { ...p[3], value: `${pending}` },
-      ]);
-      setLoading(false);
-    }
-    load();
+    let cancelled = false;
+    void (async () => {
+      const stored = getAdminKey();
+      if (!cancelled && stored) setUnlocked(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  useEffect(() => {
+    if (!unlocked) return;
+    let cancelled = false;
+    setLoading(true);
+    void Promise.all([adminListOrders({ limit: 10 }), adminListStock()]).then(
+      ([orderResult, stockResult]) => {
+        if (cancelled) return;
+        setLoading(false);
+
+        const unauthorized = [orderResult, stockResult].some(
+          (result) => result.status === 401 || result.errorCode === "UNAUTHORIZED"
+        );
+        if (unauthorized) {
+          setAdminKey("");
+          setUnlocked(false);
+          setAuthError("That admin key was rejected. Enter the key configured on the server.");
+          return;
+        }
+        if (orderResult.ok && orderResult.data) setOrders(orderResult.data);
+        if (stockResult.ok && stockResult.data) setStock(stockResult.data);
+        const failures = [orderResult, stockResult]
+          .filter((result) => !result.ok)
+          .map((result) => result.error)
+          .filter(Boolean);
+        setError(failures.join(" ") || "");
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [unlocked, refreshNonce]);
+
+  const stockByProduct = new Map(
+    (stock?.products ?? []).map((row) => [row.product_id, row.available])
+  );
+  const lowStockProducts = products
+    .map((product) => ({
+      ...product,
+      available: stockByProduct.get(product.id) ?? product.stock,
+    }))
+    .filter((product) => product.available <= LOW_STOCK_LIMIT)
+    .sort((a, b) => a.available - b.available);
+  const recentOrders = (orders?.orders ?? []).map(toAdminOrderView);
+  const pending = orders?.totals.counts.pending ?? 0;
+
+  const unlock = (event: React.FormEvent) => {
+    event.preventDefault();
+    const value = keyDraft.trim();
+    if (!value) {
+      setAuthError("Enter the admin key.");
+      return;
+    }
+    setAdminKey(value);
+    setAuthError("");
+    setUnlocked(true);
+  };
+
+  if (!unlocked) {
+    return (
+      <div className="max-w-md">
+        <h1 className="text-2xl font-extrabold text-[var(--color-charcoal)]">Dashboard</h1>
+        <p className="text-sm text-gray-500 mt-1 mb-5">Unlock store operations and order summaries.</p>
+        <form onSubmit={unlock} className="bg-white rounded-xl border p-5">
+          {authError && <p className="text-xs text-red-700 mb-3">{authError}</p>}
+          <label htmlFor="dashboard-admin-key" className="block text-xs font-bold mb-1.5">
+            Admin API key
+          </label>
+          <input
+            id="dashboard-admin-key"
+            type="password"
+            autoComplete="current-password"
+            value={keyDraft}
+            onChange={(event) => setKeyDraft(event.target.value)}
+            className="w-full rounded-lg border px-3 py-2 text-sm"
+          />
+          <button
+            type="submit"
+            className="w-full mt-3 rounded-lg bg-[var(--color-brand)] px-4 py-2.5 text-sm font-bold text-white"
+          >
+            Unlock dashboard
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  const stats = [
+    { label: "Lifetime revenue", value: orders ? formatPrice(orders.totals.revenue_usd, "USD") : "—" },
+    { label: "Orders recorded", value: orders ? String(orders.totals.scanned) : "—" },
+    { label: "Awaiting payment", value: orders ? String(pending) : "—" },
+    { label: "Available stock", value: stock ? String(stock.totals.available) : "—" },
+  ];
+
   return (
-    <div>
-      <div className="mb-6"><h1 className="text-2xl font-bold text-[var(--color-charcoal)]">Dashboard</h1><p className="text-sm text-gray-500 mt-1">Store overview</p></div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {stats.map((s) => (
-          <div key={s.label} className="bg-white rounded-lg border p-4 sm:p-5">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-gray-500">{s.label}</span>
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${s.color}`}><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={s.icon} /></svg></div>
-            </div>
-            <p className="text-xl sm:text-2xl font-bold text-[var(--color-charcoal)]">{loading ? "..." : s.value}</p>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-[var(--color-charcoal)]">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-1">Live order and inventory overview</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setRefreshNonce((value) => value + 1)}
+          disabled={loading}
+          className="rounded-lg border px-3 py-2 text-xs font-bold disabled:opacity-50"
+        >
+          {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        {stats.map((stat) => (
+          <div key={stat.label} className="bg-white rounded-xl border p-4">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">{stat.label}</p>
+            <p className="mt-2 text-xl font-extrabold tabular-nums">{loading ? "…" : stat.value}</p>
           </div>
         ))}
       </div>
-      <div className="bg-white rounded-lg border">
-        <div className="px-5 py-4 border-b flex items-center justify-between"><h2 className="font-bold text-sm uppercase tracking-wider">Recent Orders</h2></div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="text-left text-[10px] font-bold uppercase text-gray-400 border-b"><th className="px-4 py-3">ID</th><th className="px-4 py-3">Customer</th><th className="px-4 py-3">Amount</th><th className="px-4 py-3">Payment</th><th className="px-4 py-3">Status</th></tr></thead>
-            <tbody>
-              {loading ? <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">Loading...</td></tr> :
-               recentOrders.length === 0 ? <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400 text-xs">No orders yet</td></tr> :
-               recentOrders.map((o) => (
-                <tr key={o.id} className="border-b hover:bg-gray-50/50">
-                  <td className="px-4 py-3 font-mono text-[11px]">#{o.id.slice(0,8)}</td>
-                  <td className="px-4 py-3 text-xs">{o.buyerName || "—"}</td>
-                  <td className="px-4 py-3 text-xs font-bold">{formatPrice(o.amountUsd ?? 0, "USD")}</td>
-                  <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded bg-gray-100">{o.gateway ?? "—"}</span></td>
-                  <td className="px-4 py-3"><span className={`text-[10px] font-bold px-2 py-0.5 rounded ${o.status==="paid"||o.status==="delivered"?"bg-green-100 text-green-700":o.status==="failed"?"bg-red-100 text-red-700":"bg-amber-100 text-amber-700"}`}>{o.status ?? "pending"}</span></td>
+
+      <div className="grid grid-cols-1 xl:grid-cols-[1.5fr_1fr] gap-5">
+        <section className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-4 py-3 border-b flex items-center justify-between">
+            <h2 className="text-sm font-bold">Recent orders</h2>
+            <Link href="/admin/orders" className="text-xs font-bold text-[var(--color-brand)] hover:underline">
+              View all
+            </Link>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[10px] font-bold uppercase text-gray-400 border-b">
+                  <th className="px-4 py-3">Order</th>
+                  <th className="px-4 py-3">Customer</th>
+                  <th className="px-4 py-3">Amount</th>
+                  <th className="px-4 py-3">Status</th>
                 </tr>
+              </thead>
+              <tbody>
+                {loading && !recentOrders.length ? (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400 text-xs">Loading orders…</td></tr>
+                ) : recentOrders.length === 0 ? (
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400 text-xs">No orders yet</td></tr>
+                ) : recentOrders.map((order) => (
+                  <tr key={order.id} className="border-b last:border-0">
+                    <td className="px-4 py-3 font-mono text-[11px]">#{order.id.slice(0, 8)}</td>
+                    <td className="px-4 py-3 text-xs">{order.buyerName || "—"}</td>
+                    <td className="px-4 py-3 text-xs font-bold">{formatPrice(order.amountUsd ?? 0, "USD")}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded bg-gray-100 px-2 py-1 text-[10px] font-bold uppercase">{order.status ?? "pending"}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="bg-white rounded-xl border overflow-hidden">
+          <div className="px-4 py-3 border-b flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold">Low stock</h2>
+              <p className="text-[10px] text-gray-500 mt-0.5">10 units or fewer</p>
+            </div>
+            <Link href="/admin/inventory" className="text-xs font-bold text-[var(--color-brand)] hover:underline">
+              Manage stock
+            </Link>
+          </div>
+          {loading && !stock ? (
+            <p className="p-4 text-xs text-gray-400">Loading inventory…</p>
+          ) : lowStockProducts.length === 0 ? (
+            <p className="p-4 text-xs text-gray-500">No products are at or below the alert level.</p>
+          ) : (
+            <ul className="divide-y">
+              {lowStockProducts.slice(0, 6).map((product) => (
+                <li key={product.id} className="flex items-center gap-3 px-4 py-3">
+                  <span className={`w-2 h-2 rounded-full ${product.available <= 0 ? "bg-red-500" : "bg-amber-500"}`} />
+                  <span className="min-w-0 flex-1 truncate text-xs font-medium">{product.name}</span>
+                  <span className={`text-xs font-extrabold tabular-nums ${product.available <= 0 ? "text-red-600" : "text-amber-700"}`}>
+                    {product.available} left
+                  </span>
+                </li>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </ul>
+          )}
+        </section>
       </div>
     </div>
   );

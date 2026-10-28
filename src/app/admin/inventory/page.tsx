@@ -8,6 +8,7 @@ import { formatPrice } from "@/lib/currency";
 import Icon from "@/components/ui/Icon";
 import {
   adminAddStock,
+  adminDeleteUnit,
   adminListStock,
   adminSmsotpStatus,
   getAdminKey,
@@ -24,7 +25,7 @@ export default function AdminInventoryPage() {
   const [unlocked, setUnlocked] = useState(false);
   const [authError, setAuthError] = useState("");
 
-  const [productId, setProductId] = useState(products[0]?.id ?? "");
+  const [productId, setProductId] = useState(products.find((product) => !isProxyProduct(product))?.id ?? "");
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<InventoryAddResponse | null>(null);
@@ -35,12 +36,18 @@ export default function AdminInventoryPage() {
   const [listError, setListError] = useState("");
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [smsProvider, setSmsProvider] = useState<SmsotpStatusResponse | null>(null);
+  const [deletingUnit, setDeletingUnit] = useState("");
+  const [deleteError, setDeleteError] = useState("");
 
   // Restore the key from this tab's session storage. Reads happen inside an
   // async body because sessionStorage only exists in the browser, so this
   // cannot be a lazy useState initialiser without breaking hydration.
   useEffect(() => {
     let cancelled = false;
+    const requestedProduct = new URLSearchParams(window.location.search).get("productId");
+    if (requestedProduct && products.some((product) => product.id === requestedProduct && !isProxyProduct(product))) {
+      setProductId(requestedProduct);
+    }
     (async () => {
       const stored = getAdminKey();
       if (cancelled || !stored) return;
@@ -156,6 +163,24 @@ export default function AdminInventoryPage() {
     setSubmitting(false);
   };
 
+  const handleDeleteUnit = async (
+    row: InventoryListResponse["products"][number],
+    unit: InventoryListResponse["products"][number]["sample"][number]
+  ) => {
+    if (!unit.unit_id || !window.confirm(`Remove available stock item "${unit.uid}"?`)) {
+      return;
+    }
+    setDeletingUnit(unit.unit_id);
+    setDeleteError("");
+    const res = await adminDeleteUnit(row.product_id, unit.unit_id);
+    setDeletingUnit("");
+    if (!res.ok) {
+      setDeleteError(res.error ?? "Could not remove this stock item.");
+      return;
+    }
+    refreshList();
+  };
+
   const inputClass =
     "w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-page)] text-sm outline-none focus:border-[var(--color-brand)]";
   const card = "bg-[var(--color-panel)] rounded-2xl border border-[var(--color-line)] p-5";
@@ -235,6 +260,9 @@ export default function AdminInventoryPage() {
             <h2 className="text-xs font-bold uppercase tracking-wider text-[var(--color-ink-soft)] mb-4">
               Bulk Credential Upload
             </h2>
+            <p className="mb-4 text-xs text-[var(--color-ink-soft)]">
+              Proxy products use live provider fulfillment and cannot be stocked from pasted lists.
+            </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
@@ -251,7 +279,7 @@ export default function AdminInventoryPage() {
                   {categories.map((cat) => (
                     <optgroup key={cat.id} label={cat.name}>
                       {products
-                        .filter((p) => p.category === cat.id)
+                        .filter((p) => p.category === cat.id && !isProxyProduct(p))
                         .map((p) => (
                           <option key={p.id} value={p.id}>
                             {p.name}
@@ -476,6 +504,11 @@ export default function AdminInventoryPage() {
               </p>
             ) : (
               <>
+                {deleteError && (
+                  <p className="mb-3 text-[10px] text-[var(--color-danger)]">
+                    {deleteError}
+                  </p>
+                )}
                 <div className="grid grid-cols-3 gap-2 mb-4">
                   {[
                     { label: "Products", value: list.totals.products },
@@ -520,6 +553,34 @@ export default function AdminInventoryPage() {
                             {row.sold} sold
                           </span>
                         </div>
+                        {row.product_id === productId && row.sample.length > 0 && (
+                          <ul className="mt-3 pt-2 border-t border-[var(--color-line)] space-y-1.5">
+                            {row.sample.map((unit) => (
+                              <li
+                                key={unit.unit_id || unit.uid}
+                                className="flex items-center gap-2 text-[10px]"
+                              >
+                                <span className="min-w-0 flex-1 truncate font-mono text-[var(--color-ink-soft)]">
+                                  {unit.uid}
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={!unit.unit_id || deletingUnit === unit.unit_id}
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    void handleDeleteUnit(row, unit);
+                                  }}
+                                  className="shrink-0 text-[var(--color-danger)] hover:underline disabled:opacity-50"
+                                >
+                                  {deletingUnit === unit.unit_id ? "Removing…" : "Remove"}
+                                </button>
+                              </li>
+                            ))}
+                            <li className="text-[9px] text-[var(--color-ink-faint)]">
+                              Showing up to {row.sample.length} available items. Sold items cannot be removed here.
+                            </li>
+                          </ul>
+                        )}
                       </li>
                     );
                   })}

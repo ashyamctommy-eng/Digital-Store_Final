@@ -6,14 +6,16 @@ import {
   useState,
   useMemo,
   useCallback,
+  useEffect,
   ReactNode,
 } from "react";
 import {
   browseProducts,
-  featuredProducts,
+  products as initialProducts,
   type Product,
 } from "@/lib/products";
 import type { SortOption } from "@/lib/categories";
+import { API_BASE } from "@/lib/payments";
 
 /**
  * Shared catalog browsing state.
@@ -35,6 +37,8 @@ interface CatalogContextType {
   isFiltering: boolean;
   results: Product[];
   featured: Product[];
+  products: Product[];
+  loaded: boolean;
   reset: () => void;
   /** Toggles a chip: tapping the active tag clears it. */
   toggleTag: (tag: string) => void;
@@ -43,15 +47,36 @@ interface CatalogContextType {
 const CatalogContext = createContext<CatalogContextType | undefined>(undefined);
 
 export function CatalogProvider({ children }: { children: ReactNode }) {
+  const [products, setProducts] = useState<Product[]>(initialProducts);
+  const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [tag, setTag] = useState<string | null>(null);
   const [sort, setSort] = useState<SortOption>("popular");
 
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(`${API_BASE}/catalog`, { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("catalog unavailable"))))
+      .then((payload: { products?: Product[] }) => {
+        if (cancelled || !Array.isArray(payload.products)) return;
+        const active = payload.products.filter((product) => product && product.active !== false);
+        setProducts(active);
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const results = useMemo(
-    () => browseProducts({ query, category, tag, sort }),
-    [query, category, tag, sort]
+    () => browseProducts({ query, category, tag, sort }, products),
+    [query, category, tag, sort, products]
   );
+  const featured = useMemo(() => products.filter((product) => product.featured), [products]);
 
   const reset = useCallback(() => {
     setQuery("");
@@ -76,11 +101,13 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       setSort,
       isFiltering: Boolean(query.trim() || category || tag),
       results,
-      featured: featuredProducts,
+      featured,
+      products,
+      loaded,
       reset,
       toggleTag,
     }),
-    [query, category, tag, sort, results, reset, toggleTag]
+    [query, category, tag, sort, results, featured, products, loaded, reset, toggleTag]
   );
 
   return (

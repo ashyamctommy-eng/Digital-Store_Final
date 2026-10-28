@@ -48,11 +48,17 @@ export interface Product {
   };
   /** Required when delivery_kind is "proxy". */
   proxy?: {
-    /** How many addresses one unit of this product is worth. */
+    /** How many proxy credentials one unit contains. */
     per_unit: number;
     /** Display label for the network being supplied. */
     label: string;
+    pool_type?: "res" | "mob" | "dc";
+    country?: string;
+    protocol?: "http" | "https" | "socks4" | "socks5";
+    data_gb?: number;
   };
+  /** Runtime state returned by the server catalog API. */
+  active?: boolean;
 }
 
 export const products: Product[] = [
@@ -485,12 +491,6 @@ export const products: Product[] = [
     proxy: { per_unit: 10, label: "Static IPs" },
   },
   {
-    /*
-     * Deliberately NOT delivery_kind "proxy": this sells 5GB of rotating
-     * bandwidth with a gateway credential, not a list of addresses. The proxy
-     * provider hands back IP:PORT pairs, so auto-fulfilling this would deliver
-     * the wrong thing. Stock it by hand.
-     */
     id: "proxy-rot-01",
     slug: "rotating-residential-proxies-5gb",
     name: "Rotating Residential Proxies — 5GB",
@@ -498,7 +498,7 @@ export const products: Product[] = [
     country_flags: "🌐",
     price_usd: 26.00,
     image: "/assets/images/proxy-logo.svg",
-    stock: 400,
+    stock: 0,
     description: "5GB rotating residential traffic with automatic IP rotation",
     specs: [
       "5GB bandwidth included",
@@ -508,6 +508,15 @@ export const products: Product[] = [
     ],
     guide_url: "",
     delivery: "Instant",
+    delivery_kind: "proxy",
+    proxy: {
+      per_unit: 1,
+      label: "Rotating residential",
+      pool_type: "res",
+      country: "any",
+      protocol: "http",
+      data_gb: 5,
+    },
   },
   {
     id: "proxy-mobile-02",
@@ -604,9 +613,9 @@ const TAG_TO_CATEGORIES: Record<string, string[]> = {
   tiktok: ["tiktok"],
 };
 
-export function browseProducts(filters: BrowseFilters = {}): Product[] {
+export function browseProducts(filters: BrowseFilters = {}, source: Product[] = products): Product[] {
   const { query = "", category = null, tag = null, sort = "popular" } = filters;
-  let list = products.filter((p) => matchesQuery(p, query));
+  let list = source.filter((p) => matchesQuery(p, query));
 
   if (category) list = list.filter((p) => p.category === category);
 

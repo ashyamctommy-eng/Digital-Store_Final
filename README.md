@@ -22,6 +22,8 @@ npm run test:php       # backend tests (needs a PHP CLI on PATH, 8.2+)
 npm run verify         # typecheck + lint + backend tests + cPanel build
 ```
 
+For a VPS installation using Nginx + PHP-FPM, see [DEPLOY-VPS.md](DEPLOY-VPS.md).
+
 ---
 
 ## 1. Currency model

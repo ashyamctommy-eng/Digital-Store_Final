@@ -45,7 +45,7 @@ export default function ProductCard({ product }: { product: Product }) {
 
   return (
     <Link
-      href={`/products/${product.slug}/`}
+      href={`/product/?slug=${encodeURIComponent(product.slug)}`}
       className="group flex flex-col h-full bg-[var(--color-panel)] rounded-2xl border border-[var(--color-line)] shadow-sm hover:shadow-md hover:border-[var(--color-brand)]/40 transition-all duration-200 overflow-hidden"
     >
       {/* Visual */}

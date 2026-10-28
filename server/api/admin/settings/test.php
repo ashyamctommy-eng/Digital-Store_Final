@@ -23,6 +23,7 @@ require_once __DIR__ . '/../../lib/palplus.php';
 require_once __DIR__ . '/../../lib/nowpayments.php';
 require_once __DIR__ . '/../../lib/smsotp.php';
 require_once __DIR__ . '/../../lib/email.php';
+require_once __DIR__ . '/../../lib/ghostproxies.php';
 require_once __DIR__ . '/../../lib/proxycheck.php';
 
 $config = load_config();
@@ -192,8 +193,34 @@ switch ($integration) {
         }
         break;
 
+    case 'ghostproxies':
+        if (!ghostproxies_is_configured($config)) {
+            $error = 'No GhostProxies API key is set yet.';
+            break;
+        }
+        $status = ghostproxies_request($config, 'settings');
+        $checks[] = check_row(
+            'GhostProxies API key is accepted',
+            $status['ok'],
+            $status['error'] ?? 'Account settings endpoint is reachable.'
+        );
+        if ($status['ok']) {
+            $stats = ghostproxies_request($config, 'stats');
+            $checks[] = check_row(
+                'Account usage endpoint is reachable',
+                $stats['ok'],
+                $stats['error'] ?? 'Live stats endpoint is reachable.'
+            );
+            if (!$stats['ok']) {
+                $error = $stats['error'];
+            }
+        } else {
+            $error = $status['error'];
+        }
+        break;
+
     default:
-        json_error('Unknown integration. Use palplus, nowpayments, resend, smsotp or proxycheck.', 422, 'UNKNOWN_INTEGRATION');
+        json_error('Unknown integration. Use palplus, nowpayments, resend, smsotp, proxycheck or ghostproxies.', 422, 'UNKNOWN_INTEGRATION');
 }
 
 store_log($config, 'admin.settings.test', [

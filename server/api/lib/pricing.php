@@ -116,8 +116,17 @@ function pricing_describe_items(array $items): array
 {
     $out = [];
     foreach ($items as $item) {
-        $price = catalog_price_usd((string) ($item['product_id'] ?? '')) ?? 0.0;
+        $product = catalog_product_runtime((string) ($item['product_id'] ?? ''));
+        $price = is_array($product) ? (float) ($product['price_usd'] ?? 0) : 0.0;
         $quantity = max(1, (int) ($item['quantity'] ?? 1));
+        if (is_array($product)) {
+            $item['name'] = (string) ($product['name'] ?? $item['name'] ?? $item['product_id']);
+            $item['catalog_snapshot'] = [
+                'delivery_kind' => (string) ($product['delivery_kind'] ?? 'credentials'),
+                'sms' => $product['sms'] ?? null,
+                'proxy' => $product['proxy'] ?? null,
+            ];
+        }
         $item['price_usd'] = $price;
         $item['line_usd'] = round($price * $quantity, 2);
         $out[] = $item;
@@ -133,11 +142,19 @@ function pricing_describe_items(array $items): array
 function pricing_require_known_products(array $items): void
 {
     foreach ($items as $item) {
-        if (catalog_price_usd((string) ($item['product_id'] ?? '')) === null) {
+        $productId = (string) ($item['product_id'] ?? '');
+        if (catalog_price_usd($productId) === null || !catalog_product_is_active($productId)) {
             json_error(
                 'One of the items in this order is no longer available. Please refresh and try again.',
                 422,
                 'UNKNOWN_PRODUCT'
+            );
+        }
+        if (catalog_is_proxy($productId)) {
+            json_error(
+                'Proxy orders are temporarily unavailable while live provider credential delivery is being configured.',
+                409,
+                'PROXY_FULFILLMENT_UNAVAILABLE'
             );
         }
     }

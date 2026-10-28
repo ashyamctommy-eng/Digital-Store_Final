@@ -37,6 +37,13 @@ if (trim($text) === '') {
 // to pick one: SMS products take `PHONE | INBOX_URL_OR_NOTES`, proxy products
 // take `IP:PORT`, everything else takes credential lines.
 $kind = catalog_delivery_kind($productId) ?? 'credentials';
+if ($kind === 'proxy') {
+    json_error(
+        'Proxy stock is not uploaded manually. Configure live provider fulfillment first.',
+        422,
+        'PROXY_STATIC_STOCK_DISABLED'
+    );
+}
 
 // Guard against a pasted novel filling the disk.
 $maxLines = (int) config_value($config, 'max_inventory_lines', 5000);

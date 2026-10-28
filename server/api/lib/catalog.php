@@ -12,6 +12,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/product-catalog.php';
+
 /** product_id => on-demand provider spec, for delivery_kind "sms" products. */
 const CATALOG_SMS_PRODUCTS = [
     'sms-whatsapp' => [
@@ -51,6 +53,10 @@ const CATALOG_PROXY_PRODUCTS = [
     'proxy-9p-10' => [
         'per_unit' => 10,
         'label' => 'Static IPs',
+    ],
+    'proxy-rot-01' => [
+        'per_unit' => 1,
+        'label' => 'Rotating residential',
     ],
     'proxy-mobile-02' => [
         'per_unit' => 5,
@@ -100,59 +106,72 @@ const CATALOG_PRICES = [
 /** The delivery kind recorded in the catalog, or null for an unknown product. */
 function catalog_delivery_kind(string $productId): ?string
 {
-    if (isset(CATALOG_SMS_PRODUCTS[$productId])) {
-        return 'sms';
-    }
-    if (isset(CATALOG_PROXY_PRODUCTS[$productId])) {
-        return 'proxy';
-    }
-    return null;
+    $product = catalog_product_runtime($productId);
+    return $product === null || empty($product['delivery_kind'])
+        ? null
+        : (string) $product['delivery_kind'];
 }
 
 /** True when a product is fulfilled as a phone number + inbox. */
 function catalog_is_sms(string $productId): bool
 {
-    return isset(CATALOG_SMS_PRODUCTS[$productId]);
+    return catalog_delivery_kind($productId) === 'sms';
 }
 
 /** True when a product is fulfilled as an IP:PORT list. */
 function catalog_is_proxy(string $productId): bool
 {
-    return isset(CATALOG_PROXY_PRODUCTS[$productId]);
+    return catalog_delivery_kind($productId) === 'proxy';
 }
 
 /** The provider spec for an SMS product, or null. */
 function catalog_sms_spec(string $productId): ?array
 {
-    return CATALOG_SMS_PRODUCTS[$productId] ?? null;
+    $product = catalog_product_runtime($productId);
+    $spec = $product['sms'] ?? null;
+    return is_array($spec) ? $spec : null;
 }
 
 /** The pool spec for a proxy product, or null. */
 function catalog_proxy_spec(string $productId): ?array
 {
-    return CATALOG_PROXY_PRODUCTS[$productId] ?? null;
+    $product = catalog_product_runtime($productId);
+    $spec = $product['proxy'] ?? null;
+    return is_array($spec) ? $spec : null;
 }
 
 /** Every SMS product id. */
 function catalog_sms_product_ids(): array
 {
-    return array_keys(CATALOG_SMS_PRODUCTS);
+    return array_values(array_map(
+        static fn (array $p): string => (string) $p['id'],
+        array_filter(catalog_products_runtime(), static fn (array $p): bool => ($p['delivery_kind'] ?? '') === 'sms')
+    ));
 }
 
 /** Every proxy product id. */
 function catalog_proxy_product_ids(): array
 {
-    return array_keys(CATALOG_PROXY_PRODUCTS);
+    return array_values(array_map(
+        static fn (array $p): string => (string) $p['id'],
+        array_filter(catalog_products_runtime(), static fn (array $p): bool => ($p['delivery_kind'] ?? '') === 'proxy')
+    ));
 }
 
 /** Base price in USD for a product, or null when the product is unknown. */
 function catalog_price_usd(string $productId): ?float
 {
-    return isset(CATALOG_PRICES[$productId]) ? (float) CATALOG_PRICES[$productId] : null;
+    $product = catalog_product_runtime($productId);
+    return $product !== null && isset($product['price_usd'])
+        ? (float) $product['price_usd']
+        : null;
 }
 
 /** Every product id the server can price. */
 function catalog_product_ids(): array
 {
-    return array_keys(CATALOG_PRICES);
+    return array_values(array_map(
+        static fn (array $p): string => (string) $p['id'],
+        catalog_products_runtime()
+    ));
 }

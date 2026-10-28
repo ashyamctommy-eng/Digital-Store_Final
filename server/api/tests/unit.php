@@ -224,6 +224,8 @@ $firstId = $data['items'][0]['id'];
 ok(inventory_delete_unit($config, 'sms-us-01', $firstId), 'deleting a unit succeeds');
 eq(1, inventory_count_available($config, 'sms-us-01'), 'available count drops after delete');
 ok(!inventory_delete_unit($config, 'sms-us-01', 'nope'), 'deleting an unknown unit returns false');
+ok(!inventory_delete_unit($config, 'tiktok-600', $idsA[0]), 'sold stock cannot be deleted from inventory');
+eq(0, inventory_count_available($config, 'tiktok-600'), 'refusing a sold-unit delete leaves stock counts unchanged');
 
 $summary = inventory_summary($config);
 $row = null;
@@ -234,6 +236,14 @@ foreach ($summary as $s) {
 }
 eq(3, $row['sold'] ?? null, 'summary reports 3 sold for tiktok-600');
 eq(0, $row['available'] ?? null, 'summary reports 0 available for tiktok-600');
+$smsRow = null;
+foreach ($summary as $s) {
+    if ($s['product_id'] === 'sms-us-01') {
+        $smsRow = $s;
+    }
+}
+ok(isset($smsRow['sample'][0]['unit_id']), 'available stock summary includes a unit id for admin removal');
+ok(!array_key_exists('secret', $smsRow['sample'][0] ?? []), 'available stock summary does not return full credential secrets');
 
 /* ---------------------------------------------------------------- */
 section('dispatch_order');
@@ -616,124 +626,23 @@ section('Proxy dispatch bookkeeping');
 $proxyConfig = ['data_dir' => $tmp . '/proxy-dispatch'];
 @mkdir($proxyConfig['data_dir'], 0777, true);
 
-// With the provider switched off and no stock, the order must fail closed.
 $result = dispatch_claim_proxy($proxyConfig, 'proxy-dc-03', 1, 'ORDER_off_1');
-eq([], $result['units'], 'no provider and no stock delivers nothing');
-eq(1, $result['shortfall'], 'and reports the full shortfall');
+eq([], $result['units'], 'proxy delivery does not use uploaded inventory');
+eq(1, $result['shortfall'], 'unconfigured provider leaves a shortfall');
 
-// A product that is not a proxy product cannot be proxy-dispatched.
 $missing = dispatch_claim_proxy($proxyConfig, 'vpn-nord-1y', 1, 'ORDER_off_2');
 eq(1, $missing['shortfall'], 'a non-proxy product is refused');
 
-// 7 addresses cannot make a 10-IP unit; they must not be sold as one.
 inventory_add_units($proxyConfig, 'proxy-9p-10', implode("\n", [
-    '203.0.30.1:8080',
-    '203.0.30.2:8080',
-    '203.0.30.3:8080',
-    '203.0.30.4:8080',
-    '203.0.30.5:8080',
-    '203.0.30.6:8080',
+    '203.0.30.1:8080', '203.0.30.2:8080', '203.0.30.3:8080',
+    '203.0.30.4:8080', '203.0.30.5:8080', '203.0.30.6:8080',
     '203.0.30.7:8080',
 ]), 'proxy');
-eq(7, inventory_count_available($proxyConfig, 'proxy-9p-10'), '7 addresses were stocked');
-
-$partial = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 1, 'ORDER_partial_1');
-eq([], $partial['units'], 'a partial unit is not sold');
-eq(7, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'the stranded addresses stay available');
-eq(1, $partial['shortfall'], 'the shortfall is reported');
-
-// 10 addresses is exactly one unit.
-inventory_add_units($proxyConfig, 'proxy-9p-10', implode("\n", [
-    '203.0.31.1:8080', '203.0.31.2:8080', '203.0.31.3:8080', '203.0.31.4:8080',
-    '203.0.31.5:8080', '203.0.31.6:8080', '203.0.31.7:8080', '203.0.31.8:8080',
-    '203.0.31.9:8080', '203.0.31.10:8080',
-]), 'proxy');
-eq(17, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'stock is now 17 addresses');
-
-$whole = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 1, 'ORDER_whole_1');
-eq(1, count($whole['units']), 'a whole unit is delivered');
-eq(0, $whole['shortfall'], 'with no shortfall');
-eq(10, $whole['units'][0]['proxy_count'], 'and exactly 10 addresses');
-eq('static', $whole['units'][0]['source'], 'from pre-bought stock');
-eq(10, count($whole['units'][0]['proxies']), 'the address list carries every address');
-eq(7, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'the next 7 addresses were left untouched');
-
-// Order quantity multiplies the unit, and the addresses must not repeat.
-$two = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 2, 'ORDER_two_1');
-$collected = [];
-foreach ($two['units'] as $unit) {
-    foreach ($unit['proxies'] as $address) {
-        $collected[] = $address;
-    }
-}
-eq(count($collected), count(array_unique($collected)), 'no address is delivered twice across units');
-
-// A partial unit is never sold: 7 addresses cannot make a 10-IP product.
-$partial = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 1, 'ORDER_partial_1');
-eq([], $partial['units'], 'a partial unit is not sold');
-eq(1, $partial['shortfall'], 'the shortfall is reported');
-
-// Exactly one unit is delivered, with credentials carried through.
-inventory_add_units($proxyConfig, 'proxy-9p-10', implode("\n", [
-    'u1:p1@8.8.8.8:8080',
-    '8.8.4.4:8080:u2:p2',
-    '8.8.8.8:8081',
-    '8.8.4.4:8081',
-    '8.8.8.8:8082',
-    '8.8.4.4:8082',
-    '8.8.8.8:8083',
-    '8.8.4.4:8083',
-    '8.8.8.8:8084',
-    '8.8.4.4:8084',
-]), 'proxy');
-
-$whole = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 1, 'ORDER_whole_1');
-eq(1, count($whole['units']), 'a whole unit is delivered');
-eq(0, $whole['shortfall'], 'with no shortfall');
-eq(10, $whole['units'][0]['proxy_count'], 'and exactly 10 addresses');
-eq('static', $whole['units'][0]['source'], 'from uploaded stock');
-eq(
-    'u1:p1',
-    $whole['units'][0]['proxy_auth']['8.8.8.8:8080'] ?? '',
-    'credentials-first lines keep their auth'
-);
-eq(
-    'u2:p2',
-    $whole['units'][0]['proxy_auth']['8.8.4.4:8080'] ?? '',
-    'credentials-last lines keep their auth'
-);
-ok(
-    !isset($whole['units'][0]['proxy_auth']['8.8.8.8:8081']),
-    'an address with no credentials is absent from the auth map'
-);
-
-// Quantity multiplies the unit and never repeats an address. Seven addresses
-// were left stranded by the partial-unit test above, so 13 more make exactly two
-// whole 10-IP units.
-eq(7, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'the stranded addresses survived the claim');
-inventory_add_units($proxyConfig, 'proxy-9p-10', implode("\n", [
-    '9.9.9.1:8080', '9.9.9.2:8080', '9.9.9.3:8080', '9.9.9.4:8080', '9.9.9.5:8080',
-    '9.9.9.6:8080', '9.9.9.7:8080', '9.9.9.8:8080', '9.9.9.9:8080', '9.9.9.10:8080',
-    '9.9.9.11:8080', '9.9.9.12:8080', '9.9.9.13:8080',
-]), 'proxy');
-eq(20, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'stock is now exactly two units');
-$two = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 2, 'ORDER_two_1');
-$collected = [];
-foreach ($two['units'] as $unit) {
-    foreach ($unit['proxies'] as $address) {
-        $collected[] = $address;
-    }
-}
-eq(20, count($collected), 'two units deliver twenty addresses');
-eq(count($collected), count(array_unique($collected)), 'no address is delivered twice');
-
-// The rendered export carries credentials, or the buyer cannot use the proxy.
-$text = dispatch_render_text(
-    ['order_id' => 'ORDER_whole_1', 'items' => []],
-    $whole['units']
-);
-ok(str_contains($text, 'u1:p1@8.8.8.8:8080') || str_contains($text, 'u1:p1'), 'the export includes proxy credentials');
-ok(!str_contains($text, '•'), 'the export contains no masked placeholder');
+eq(7, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'legacy proxy inventory remains untouched');
+$result = dispatch_claim_proxy($proxyConfig, 'proxy-9p-10', 1, 'ORDER_legacy_proxy_1');
+eq([], $result['units'], 'legacy proxy inventory is never delivered');
+eq(1, $result['shortfall'], 'the proxy line remains unavailable until provider delivery is configured');
+eq(7, inventory_count_available($proxyConfig, 'proxy-9p-10'), 'dispatch does not consume uploaded proxy inventory');
 
 /* ---------------------------------------------------------------- */
 section('Proxy catalog');

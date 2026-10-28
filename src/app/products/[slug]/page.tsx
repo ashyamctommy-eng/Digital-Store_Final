@@ -1,13 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import {
-  getProductBySlug,
-  products as allProducts,
-  type Product,
-} from "@/lib/products";
+import type { Product } from "@/lib/products";
 import { getCategory } from "@/lib/categories";
 import { useCart } from "@/context/CartContext";
 import { asset } from "@/lib/asset";
@@ -16,11 +12,25 @@ import { useCurrency } from "@/context/CurrencyContext";
 import { useStock } from "@/context/StockContext";
 import { DELIVERY, SUPPORT } from "@/lib/config";
 import Icon from "@/components/ui/Icon";
+import { useCatalog } from "@/context/CatalogContext";
 
 export default function ProductDetailPage() {
   const params = useParams<{ slug: string }>();
-  const slug = params?.slug;
-  const product = slug ? getProductBySlug(slug) : undefined;
+  const routeSlug = params?.slug;
+  const { products: catalogProducts, loaded: catalogLoaded } = useCatalog();
+  const [queryProduct, setQueryProduct] = useState<{ id: string; slug: string } | null>(null);
+  useEffect(() => {
+    if (routeSlug) return;
+    const search = new URLSearchParams(window.location.search);
+    setQueryProduct({
+      id: search.get("id") ?? "",
+      slug: search.get("slug") ?? "",
+    });
+  }, [routeSlug]);
+  const product = routeSlug
+    ? catalogProducts.find((item) => item.slug === routeSlug)
+    : catalogProducts.find((item) => item.id === queryProduct?.id || item.slug === queryProduct?.slug);
+  const detailLoading = !catalogLoaded || (!routeSlug && queryProduct === null);
 
   const { addToCart, setIsCartOpen } = useCart();
   const { format, currency } = useCurrency();
@@ -30,12 +40,19 @@ export default function ProductDetailPage() {
 
   const related = useMemo<Product[]>(() => {
     if (!product) return [];
-    return allProducts
+    return catalogProducts
       .filter((p) => p.category === product.category && p.id !== product.id)
       .slice(0, 4);
-  }, [product]);
+  }, [catalogProducts, product]);
 
   if (!product) {
+    if (detailLoading) {
+      return (
+        <div className="min-h-[70dvh] flex items-center justify-center px-4">
+          <p className="text-sm text-[var(--color-ink-soft)]">Loading product…</p>
+        </div>
+      );
+    }
     return (
       <div className="min-h-[70dvh] flex items-center justify-center px-4">
         <div className="text-center">

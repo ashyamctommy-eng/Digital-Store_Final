@@ -15,8 +15,8 @@
  * holds a spendable balance — so the storefront should stay purchasable rather
  * than showing Out of Stock.
  *
- * Proxy products are NOT listed here: they are stocked by hand and have no
- * on-demand source, so their availability is simply COUNT(available).
+ * Proxy products are omitted: their availability must come from live provider
+ * fulfillment, not manually uploaded inventory.
  *
  * Response {
  *   counts:  { "<product_id>": 12, ... },
@@ -42,6 +42,9 @@ if (!config_value($config, 'inventory_drives_stock', true)) {
 }
 
 $counts = inventory_counts($config);
+foreach (catalog_proxy_product_ids() as $proxyId) {
+    unset($counts[$proxyId]);
+}
 
 // Resolve on-demand availability once, not per product.
 $dynamic = [];

@@ -130,7 +130,7 @@ export default function CartDrawer() {
                     }`}
                   >
                     <Link
-                      href={`/products/${item.slug}/`}
+                      href={`/product/?slug=${encodeURIComponent(item.slug)}`}
                       onClick={close}
                       className="w-16 h-16 rounded-xl bg-[var(--color-page)] flex items-center justify-center flex-shrink-0 overflow-hidden"
                     >
