@@ -82,6 +82,17 @@ return [
     ],
 
     // ---------------------------------------------------------------
+    // Novita AI — optional server-side product-description drafting
+    // Prefer the NOVITA_API_KEY and NOVITA_MODEL environment variables, or
+    // configure them from Super Admin → Configurations. They are never sent
+    // to the browser.
+    // ---------------------------------------------------------------
+    'novita' => [
+        'api_key' => getenv('NOVITA_API_KEY') ?: '',
+        'model' => getenv('NOVITA_MODEL') ?: '',
+    ],
+
+    // ---------------------------------------------------------------
     // smsotp.net — on-demand SMS activations (hybrid SMS delivery)
     // Dashboard: https://smsotp.net/profile  → API key
     //

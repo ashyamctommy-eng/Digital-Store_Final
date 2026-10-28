@@ -6,7 +6,7 @@
  * than assumed. Pasting a key and hoping is how a store finds out at checkout
  * that its gateway was never configured.
  *
- * Request  { "integration": "palplus" | "nowpayments" | "resend" | "smsotp" | "proxycheck" }
+ * Request  { "integration": "palplus" | "nowpayments" | "resend" | "smsotp" | "proxycheck" | "ghostproxies" | "novita" }
  * Response { ok, integration, checks: [{ label, ok, detail }], error }
  *
  * Every check is read-only. Nothing here sends money, sends mail, or buys a
@@ -25,6 +25,7 @@ require_once __DIR__ . '/../../lib/smsotp.php';
 require_once __DIR__ . '/../../lib/email.php';
 require_once __DIR__ . '/../../lib/ghostproxies.php';
 require_once __DIR__ . '/../../lib/proxycheck.php';
+require_once __DIR__ . '/../../lib/novita.php';
 
 $config = load_config();
 require_method('POST');
@@ -219,8 +220,23 @@ switch ($integration) {
         }
         break;
 
+    case 'novita':
+        if (!novita_is_configured($config)) {
+            $error = 'Set both the Novita API key and model ID first.';
+            break;
+        }
+        $status = novita_test_connection($config);
+        $checks[] = check_row('Novita credentials are accepted', $status['api_ok'], $status['error']);
+        $checks[] = check_row(
+            'Configured model is available',
+            $status['model_ok'],
+            $status['model_ok'] ? 'The configured model is listed by Novita.' : $status['error']
+        );
+        $error = $status['error'];
+        break;
+
     default:
-        json_error('Unknown integration. Use palplus, nowpayments, resend, smsotp, proxycheck or ghostproxies.', 422, 'UNKNOWN_INTEGRATION');
+        json_error('Unknown integration. Use palplus, nowpayments, resend, smsotp, proxycheck, ghostproxies or novita.', 422, 'UNKNOWN_INTEGRATION');
 }
 
 store_log($config, 'admin.settings.test', [

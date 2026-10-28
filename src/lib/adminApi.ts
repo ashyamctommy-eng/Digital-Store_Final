@@ -167,6 +167,22 @@ export function adminSaveCatalogProduct(
   });
 }
 
+export interface ProductDescriptionDraft {
+  description: string;
+}
+
+export function adminGenerateProductDescription(input: {
+  name: string;
+  category: string;
+  description: string;
+  specs: string[];
+}): Promise<ApiResult<ProductDescriptionDraft>> {
+  return adminFetch("/admin/ai/product-description", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
 export function adminSetCatalogActive(
   productId: string,
   active: boolean
@@ -250,7 +266,7 @@ export interface IntegrationTestResult {
 
 /** Asks the live provider whether a credential actually works. */
 export function adminTestIntegration(
-  integration: "palplus" | "nowpayments" | "resend" | "smsotp" | "proxycheck" | "ghostproxies"
+  integration: "palplus" | "nowpayments" | "resend" | "smsotp" | "proxycheck" | "ghostproxies" | "novita"
 ): Promise<ApiResult<IntegrationTestResult>> {
   return adminFetch("/admin/settings/test", {
     method: "POST",

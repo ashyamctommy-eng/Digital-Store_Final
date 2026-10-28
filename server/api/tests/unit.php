@@ -23,6 +23,7 @@ require_once __DIR__ . '/../lib/smsotp.php';
 require_once __DIR__ . '/../lib/proxyaddr.php';
 require_once __DIR__ . '/../lib/proxycheck.php';
 require_once __DIR__ . '/../lib/settings.php';
+require_once __DIR__ . '/../lib/novita.php';
 require_once __DIR__ . '/../lib/pricing.php';
 
 $GLOBALS['__pass'] = 0;
@@ -871,6 +872,41 @@ eq(
 ok(count(catalog_product_ids()) > 0, 'the catalog is not empty');
 
 /* ---------------------------------------------------------------- */
+/* ---------------------------------------------------------------- */
+section('Novita product-description drafts');
+
+ok(!novita_is_configured($config), 'Novita is unavailable when server credentials are absent');
+eq(
+    'A factual product description with enough detail to be useful.',
+    novita_parse_description('{"description":"A factual product description with enough detail to be useful."}'),
+    'a valid JSON description is accepted'
+);
+eq(
+    'A factual description with enough detail for a listing.',
+    novita_parse_description('{"description":"<b>A factual description with enough detail for a listing.</b>"}'),
+    'HTML is stripped from generated product copy'
+);
+eq(null, novita_parse_description('not-json'), 'non-JSON model output is rejected');
+eq(null, novita_parse_description('{"description":"Short"}'), 'too-short model output is rejected');
+eq('secret', settings_schema()['novita.api_key']['type'], 'Novita API key is defined as a secret setting');
+eq('secret', settings_schema()['novita.model']['type'], 'Novita model ID is returned only as a masked setting');
+
+$novitaTestConfig = ['data_dir' => $tmp];
+$novitaNow = 1700000000;
+$quota = novita_consume_description_quota($novitaTestConfig, $novitaNow);
+ok($quota['ok'], 'the first Novita draft request is allowed');
+eq(19, $quota['remaining'], 'the first request leaves 19 drafts for the hour');
+for ($i = 0; $i < 19; $i++) {
+    $quota = novita_consume_description_quota($novitaTestConfig, $novitaNow);
+}
+$quota = novita_consume_description_quota($novitaTestConfig, $novitaNow);
+ok(!$quota['ok'], 'the 21st request is blocked by the hourly spend limit');
+ok($quota['retry_after'] > 0, 'a blocked request reports a retry delay');
+ok(
+    novita_consume_description_quota($novitaTestConfig, $novitaNow + 3601)['ok'],
+    'expired draft requests no longer count against the hourly limit'
+);
+
 /* ---------------------------------------------------------------- */
 section('Summary');
 

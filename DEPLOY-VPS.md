@@ -76,6 +76,13 @@ Register the Palplus and NOWPayments callbacks using the exact HTTPS URLs in
 `DEPLOY.md`. Configure provider credentials in the admin Configurations page;
 the saved secret values remain server-side.
 
+For Novita product-description drafts, configure both `NOVITA_API_KEY` and
+`NOVITA_MODEL` on the VPS, or enter them in Super Admin → Configurations after
+deployment. Replit Secrets do not transfer to a separate VPS. Keep the key
+outside the static release and restrict access to the admin panel. Draft
+generation is limited to 20 requests per hour; descriptions remain editable
+and are not saved until an admin submits the product form.
+
 ## 5. Backups and updates
 
 Back up `/var/lib/digital-hub-shop` separately from static releases. It contains

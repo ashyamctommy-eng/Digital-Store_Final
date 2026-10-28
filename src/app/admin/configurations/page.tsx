@@ -30,13 +30,14 @@ import {
  */
 
 /** Which integration's "Test connection" belongs to a group. */
-const GROUP_TEST: Record<string, "palplus" | "nowpayments" | "resend" | "smsotp" | "proxycheck" | "ghostproxies"> = {
+const GROUP_TEST: Record<string, "palplus" | "nowpayments" | "resend" | "smsotp" | "proxycheck" | "ghostproxies" | "novita"> = {
   palplus: "palplus",
   nowpayments: "nowpayments",
   resend: "resend",
   smsotp: "smsotp",
   proxycheck: "proxycheck",
   ghostproxies: "ghostproxies",
+  novita: "novita",
 };
 
 export default function AdminConfigurationsPage() {

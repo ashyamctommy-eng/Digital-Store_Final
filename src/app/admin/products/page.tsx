@@ -11,6 +11,7 @@ import Icon from "@/components/ui/Icon";
 import {
   adminListCatalog,
   adminListStock,
+  adminGenerateProductDescription,
   adminSaveCatalogProduct,
   adminSetCatalogActive,
   getAdminKey,
@@ -61,6 +62,8 @@ export default function AdminProductsPage() {
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [needsApiKey, setNeedsApiKey] = useState(false);
   const [formError, setFormError] = useState("");
+  const [descriptionError, setDescriptionError] = useState("");
+  const [generatingDescription, setGeneratingDescription] = useState(false);
   const [saving, setSaving] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [refreshStock, setRefreshStock] = useState(0);
@@ -118,6 +121,7 @@ export default function AdminProductsPage() {
     setForm(blankForm);
     setEditing(null);
     setFormError("");
+    setDescriptionError("");
     setShowForm(true);
   };
 
@@ -151,6 +155,7 @@ export default function AdminProductsPage() {
     });
     setEditing(p);
     setFormError("");
+    setDescriptionError("");
     setShowForm(true);
   };
 
@@ -216,6 +221,40 @@ export default function AdminProductsPage() {
     setList(res.data.products);
     setLastRefresh(Date.now());
     setShowForm(false);
+  };
+
+  const handleGenerateDescription = async () => {
+    if (!form.name.trim()) {
+      setDescriptionError("Enter a product name before generating a draft.");
+      return;
+    }
+
+    setGeneratingDescription(true);
+    setDescriptionError("");
+    try {
+      const res = await adminGenerateProductDescription({
+        name: form.name.trim(),
+        category: getCategory(form.category)?.name ?? form.category,
+        description: form.description,
+        specs: form.specs
+          .split("\n")
+          .map((spec) => spec.trim())
+          .filter(Boolean),
+      });
+      if (!res.ok || !res.data) {
+        const message = res.error === "Could not reach the payment API."
+          ? "Could not reach the store API."
+          : res.error;
+        setDescriptionError(message ?? "Could not generate a description.");
+        if (res.status === 401) setNeedsApiKey(true);
+        return;
+      }
+      setForm((current) => ({ ...current, description: res.data!.description }));
+    } catch {
+      setDescriptionError("Could not reach Novita. Your product was not changed.");
+    } finally {
+      setGeneratingDescription(false);
+    }
   };
 
   const handleSetActive = async (product: Product) => {
@@ -593,7 +632,17 @@ export default function AdminProductsPage() {
               </div>
 
               <div>
-                <label className={labelClass}>Description</label>
+                <div className="flex items-center justify-between gap-3">
+                  <label className={labelClass}>Description</label>
+                  <button
+                    type="button"
+                    onClick={() => void handleGenerateDescription()}
+                    disabled={generatingDescription || !getAdminKey()}
+                    className="mb-1 rounded-lg border border-[var(--color-brand)]/30 px-2.5 py-1.5 text-[10px] font-bold text-[var(--color-brand)] hover:bg-[var(--color-brand)]/10 disabled:opacity-50"
+                  >
+                    {generatingDescription ? "Generating…" : "Draft with Novita"}
+                  </button>
+                </div>
                 <textarea
                   value={form.description}
                   onChange={(e) =>
@@ -602,6 +651,14 @@ export default function AdminProductsPage() {
                   rows={2}
                   className={`${inputClass} resize-none`}
                 />
+                <p className="mt-1 text-[10px] text-[var(--color-ink-faint)]">
+                  Draft only. Review accuracy before saving the product.
+                </p>
+                {descriptionError && (
+                  <p role="alert" className="mt-1 text-[11px] text-[var(--color-danger)]">
+                    {descriptionError}
+                  </p>
+                )}
               </div>
 
               <div>

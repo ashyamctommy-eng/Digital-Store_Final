@@ -139,6 +139,22 @@ function settings_schema(): array
             'advanced' => true,
         ],
 
+        // ----------------------------------------------------------- novita
+        'novita.api_key' => [
+            'group' => 'novita',
+            'label' => 'Novita API key',
+            'type' => 'secret',
+            'placeholder' => 'NOVITA_API_KEY',
+            'hint' => 'Stored only on this server. On a VPS, you can enter the key here or configure NOVITA_API_KEY in the PHP runtime environment.',
+        ],
+        'novita.model' => [
+            'group' => 'novita',
+            'label' => 'Novita model ID',
+            'type' => 'secret',
+            'placeholder' => 'NOVITA_MODEL',
+            'hint' => 'Uses the model configured in NOVITA_MODEL. Stored as a masked setting and never returned to the browser.',
+        ],
+
         // ------------------------------------------------------- resend
         'resend.api_key' => [
             'group' => 'resend',
@@ -276,6 +292,7 @@ function settings_groups(): array
         'general' => ['label' => 'General', 'blurb' => 'Where the store lives and which environment it talks to.'],
         'palplus' => ['label' => 'Palplus (M-Pesa)', 'blurb' => 'Settles KES payments.'],
         'nowpayments' => ['label' => 'NOWPayments (crypto)', 'blurb' => 'Settles USD payments.'],
+        'novita' => ['label' => 'Novita AI', 'blurb' => 'Drafts product descriptions from facts you provide; nothing is saved until you review and submit the product.'],
         'resend' => ['label' => 'Resend (order email)', 'blurb' => 'Delivers purchased credentials by email.'],
         'smsotp' => ['label' => 'SMS provider', 'blurb' => 'Supplies phone numbers on demand when your own stock runs out.'],
         'ghostproxies' => ['label' => 'GhostProxies', 'blurb' => 'Provider API access for proxy account status, pools, and order provisioning.'],

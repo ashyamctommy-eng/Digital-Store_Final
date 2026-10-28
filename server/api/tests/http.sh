@@ -206,6 +206,24 @@ check_contains "rejects with a code" '"errorCode":"UNAUTHORIZED"' "$(cat /tmp/dh
 CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/admin/smsotp-status")
 check "smsotp status without key -> 401" "401" "$CODE"
 
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/ai/product-description" \
+  -H 'Content-Type: application/json' -d '{"name":"Sample product"}')
+check "Novita draft endpoint without admin key -> 401" "401" "$CODE"
+check_contains "Novita endpoint requires admin key" '"errorCode":"UNAUTHORIZED"' "$(cat /tmp/dhs-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/ai/product-description" \
+  -H 'Content-Type: application/json' -H 'x-admin-key: test-admin-key' \
+  -d '{"name":"","category":"Sample","description":"","specs":[]}')
+check "Novita endpoint rejects an empty product name -> 422" "422" "$CODE"
+check_contains "invalid draft facts have a clear code" '"errorCode":"INVALID_PRODUCT_FACTS"' "$(cat /tmp/dhs-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/ai/product-description" \
+  -H 'Content-Type: application/json' -H 'x-admin-key: test-admin-key' \
+  -d '{"name":"Sample product","category":"Sample","description":"","specs":[]}')
+check "Novita endpoint reports missing server credentials -> 503" "503" "$CODE"
+check_contains "missing Novita config is explicit" '"errorCode":"NOVITA_NOT_CONFIGURED"' "$(cat /tmp/dhs-r.json)"
+check_absent "Novita error response never exposes a provider key" 'stub-key' "$(cat /tmp/dhs-r.json)"
+
 echo
 echo -e "\033[1mOn-demand provider status\033[0m"
 

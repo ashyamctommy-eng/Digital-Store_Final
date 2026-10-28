@@ -21,6 +21,7 @@ into client JavaScript.
 | GET | `/api/admin/settings` | Configurable settings + setup checklist (admin key) |
 | POST | `/api/admin/settings` | Save allow-listed settings (admin key) |
 | POST | `/api/admin/settings/test` | Check a credential against the live provider (admin key) |
+| POST | `/api/admin/ai/product-description` | Generate an editable product-description draft using Novita (admin key) |
 | POST | `/api/admin/proxies/check` | Test/rank pasted addresses (admin key) |
 | POST | `/api/admin/inventory/add` | Bulk credential upload (admin key) |
 | GET | `/api/admin/inventory/list` | Per-product stock totals (admin key) |
@@ -28,6 +29,11 @@ into client JavaScript.
 
 `api/.htaccess` rewrites the extensionless paths onto the `.php` files and
 hard-blocks `lib/`, `data/` and `config.php` from HTTP.
+
+Novita credentials are configured as `NOVITA_API_KEY` and `NOVITA_MODEL` on the
+server, or in Super Admin → Configurations. The AI endpoint is admin-protected,
+limited to 20 drafts per hour per installation, uses only the product facts
+provided, and never saves a catalog change automatically.
 
 ## Setup
 
