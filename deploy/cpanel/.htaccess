@@ -136,7 +136,7 @@ DirectoryIndex index.html
   RewriteRule ^\.(?!well-known/) - [F,L]
 </IfModule>
 
-<FilesMatch "(^\.|\.(env|log|json|md|lock|ts|tsx|map)$|^config\.php$|^package(-lock)?\.json$)">
+<FilesMatch "(^\.|\.(env|log|json|md|lock|ts|tsx|map)$|^config\.php$|^installer\.sh$|^package(-lock)?\.json$)">
   <IfModule mod_authz_core.c>
     Require all denied
   </IfModule>

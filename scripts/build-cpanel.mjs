@@ -177,11 +177,11 @@ async function main() {
   ----------
   1. Upload the CONTENTS of dist/ to your domain's document root
      (usually public_html/) via cPanel File Manager or FTP.
-  2. In the document root, run the installer as root (VPS) or the PHP-FPM
-     account (shared hosting): sudo bash installer.sh
-     Set the admin email/password, public URL, environment, private data path,
-     and PHP-FPM user. The installer creates config.php and stores only a
-     password hash outside the web root.
+  2. On a Debian/Ubuntu VPS, point DNS to the server and run
+     sudo bash installer.sh from the document root. Enter the domain and
+     admin email/password; the installer sets live mode, private storage,
+     Nginx, and HTTPS automatically. Use --sandbox for test payments.
+     On shared hosting, run bash installer.sh --app-only instead.
   3. Sign in at /admin, then add payment/provider credentials under
      Configurations. Do not paste keys into this installer or README.
   4. Point the Palplus channel callback and the NOWPayments IPN at

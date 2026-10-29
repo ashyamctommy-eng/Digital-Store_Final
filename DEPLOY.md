@@ -71,19 +71,24 @@ document root:
 
 ```bash
 cd ~/public_html
-bash installer.sh
+bash installer.sh --app-only
 ```
 
-The installer asks for the administrator email and password, public HTTPS URL,
-environment (`sandbox` or `live`), private data directory, and PHP-FPM user.
-Use a password of at least 14 characters. Password entry is hidden; the script
-stores only a password hash and writes the admin credentials to the private data
-directory. Provider API keys are not requested here.
+On shared hosting, use `--app-only` so the installer leaves the provider's
+Nginx/Apache and TLS configuration alone. It asks for the domain and admin
+email/password, then automatically sets the public HTTPS URL, live mode, private
+data directory, and sender address. Password entry is hidden; only a password
+hash is stored. Provider API keys are added later in Admin → Configurations.
 
-The data directory must be outside `public_html`. On shared hosting, run the
-installer as the same account PHP-FPM uses. If your host requires a separate
-system user or root permissions to create that directory, ask the host to
-provide a private writable directory before continuing.
+The installer runs as the current PHP-FPM account and defaults to a private
+directory under your home folder, outside `public_html`. If your host requires
+a different writable location, set `DHS_DATA_DIR` to an absolute private path.
+The generated sender is `orders@your-domain`; verify the domain with Resend.
+
+For a Debian/Ubuntu VPS, follow [DEPLOY-VPS.md](DEPLOY-VPS.md) and run
+`sudo bash installer.sh` instead. That path also configures Nginx and requests a
+Let's Encrypt certificate. It defaults to live gateway mode; add `--sandbox`
+while testing.
 
 To replace only the admin email/password later, run:
 
@@ -123,9 +128,9 @@ not be accessible to other users.
 `config-status` right now will look like this — that is correct at this stage:
 
 ```json
-{"palplus":{"configured":false,"mode":"sandbox","has_channel":false},
+{"palplus":{"configured":false,"mode":"live","has_channel":false},
  "nowpayments":{"configured":false,...},
- "public_base_url":"","data_dir_writable":true,"php_version":"8.2.x"}
+ "public_base_url":"https://your-domain","data_dir_writable":true,"php_version":"8.2.x"}
 ```
 
 The two things to confirm **now** are `"data_dir_writable":true` and a
@@ -151,7 +156,7 @@ against the live provider and tells you what is actually wrong.
 
 | Field | What to enter |
 | --- | --- |
-| Environment | `sandbox` while testing, `live` when you are ready |
+| Environment | Installer defaults to `live`; use `--sandbox` for test transactions |
 | Store name | Shown in order emails |
 | Public site URL | `https://your-domain` — **HTTPS, no trailing slash** |
 

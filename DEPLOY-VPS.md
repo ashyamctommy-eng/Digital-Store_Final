@@ -19,21 +19,55 @@ The deployable site and API are assembled in `dist/`. Upload the **contents** of
 that directory to the VPS document root, for example `/var/www/digital-hub-shop`.
 Do not upload `node_modules`, `.git`, source maps, or a development `.env` file.
 
-## 2. Install private configuration and admin access
+## 2. Point the domain at the VPS
+
+Create an `A` record for the domain pointing to the VPS public IPv4 address.
+If the domain uses IPv6, add an `AAAA` record only when the VPS has working
+IPv6. Wait for public DNS to resolve to this server. Ensure inbound TCP ports
+80 and 443 are reachable through both the VPS firewall and provider firewall.
+
+The installer configures the domain you enter as the canonical hostname. For a
+`www` address, enter the exact hostname you want customers to use.
+
+## 3. Install the app, web server, and HTTPS
 
 The PHP API stores orders, settings, credentials and inventory as JSON files.
-Run the installer from the deployed document root with sudo:
+On a Debian/Ubuntu VPS, run the installer as root from the deployed document
+root:
 
 ```bash
 cd /var/www/digital-hub-shop
 sudo bash installer.sh
 ```
 
-Enter the admin email/password, HTTPS site URL, environment, private data path,
-and PHP-FPM user (commonly `www-data`). Use a password of at least 14
-characters. The password is entered without echo and stored only as a hash.
-The installer writes a small `api/config.php` wrapper and stores the admin
-credential file in the private data directory; no provider keys are requested.
+The installer asks for the domain and administrator email/password. It
+automatically sets the public HTTPS URL, uses live payment mode, chooses
+`/var/lib/digital-hub-shop` for private storage, detects PHP-FPM, and configures
+Nginx and a Let's Encrypt certificate. Missing Nginx, PHP-FPM, or Certbot
+packages are installed automatically. If UFW is active, ports 80 and 443 are
+allowed. Use a password of at least 14 characters; password entry is hidden
+and only a one-way hash is stored.
+
+Live mode uses production payment gateways once their credentials are added.
+Choose `--sandbox` until you are ready to accept real transactions.
+
+Use `--sandbox` instead of live mode while testing:
+
+```bash
+sudo bash installer.sh --sandbox
+```
+
+The installer creates the Nginx site using the uploaded document root. It
+refuses to replace an unmanaged site config; installer-managed configs are
+backed up on re-run. It creates `api/config.php` and the private admin
+credential file. Provider API keys are added later in Admin → Configurations.
+The default email sender uses `orders@<domain>`; verify that sender domain with
+Resend before sending order emails.
+
+On non-Debian/Ubuntu systems or when Nginx/TLS are already managed by your host,
+run `bash installer.sh --app-only` and configure the web server using
+`deploy/vps/nginx.conf`. The installer never edits DNS records; DNS must be
+pointed at the VPS before automatic certificate issuance.
 
 The default VPS data path is `/var/lib/digital-hub-shop`, outside the document
 root. To change the admin login without changing any other configuration or
@@ -43,13 +77,15 @@ data:
 sudo bash installer.sh --reset-admin
 ```
 
-The installer assigns the private directory to the configured PHP-FPM user and
+The installer assigns the private directory to the detected PHP-FPM user and
 uses restricted permissions. Do not recursively loosen permissions on the
 document root or runtime data.
 
-## 3. Configure Nginx and PHP-FPM
+## 4. Manual Nginx setup
 
-Copy `deploy/vps/nginx.conf` into the Nginx site configuration and replace:
+Skip this section if the installer configured Nginx and HTTPS. For
+`--app-only`, copy `deploy/vps/nginx.conf` into the Nginx site configuration
+and replace:
 
 - `DOMAIN` with the purchased domain.
 - `WEB_ROOT` with the deployed `dist` directory.
@@ -64,7 +100,7 @@ Enable the site, validate it with `nginx -t`, and reload Nginx.
 Install PHP 8.2+ with `curl`, `json`, and `hash` extensions, then enable and
 start PHP-FPM. Exact package names vary by VPS distribution.
 
-## 4. Set permissions and verify
+## 5. Verify the deployment
 
 The static files should be readable by Nginx. The only writable production
 directory should be the external data directory described above. Confirm:

@@ -70,13 +70,19 @@ provided, and never saves a catalog change automatically.
 
 ## Admin authentication
 
-Run `bash installer.sh` from the deployed document root to create the initial
-administrator and server configuration. The installer asks for an admin email
-and password (14+ characters), HTTPS URL, environment, external private data
-directory, and PHP-FPM user. It writes only a password hash to
-`admin-credentials.json` inside the private data directory. The browser receives
-an HttpOnly, SameSite=Strict admin session cookie; it never stores the admin
-password or API key.
+Run `sudo bash installer.sh` from the deployed document root on a Debian/Ubuntu
+VPS. It asks for the domain and admin email/password (14+ characters), then
+automatically sets the HTTPS URL, live mode, private data directory, and
+domain-based email sender. It installs missing Nginx/PHP-FPM/Certbot packages,
+configures Nginx, and requests a Let's Encrypt certificate. DNS must already
+resolve to the VPS and ports 80/443 must be reachable. The installer writes
+only a password hash to `admin-credentials.json` inside private storage; the
+browser receives an HttpOnly admin session cookie.
+
+Use `sudo bash installer.sh --sandbox` for test payments. On shared hosting or
+when Nginx/TLS are managed separately, run `bash installer.sh --app-only` and
+complete the web-server setup yourself. Provider credentials remain in Admin →
+Configurations, not in the installer.
 
 Use `bash installer.sh --reset-admin` to change the email/password later. This
 updates only the admin credential file and preserves the store configuration,
@@ -92,16 +98,18 @@ and sessions expire after 30 minutes idle or 8 hours total.
 
 ```bash
 cd /path/to/deployed-document-root
-bash installer.sh
+sudo bash installer.sh
 ```
 
-- Install PHP 8.2+ with `curl`, `json`, and `hash`; run the installer as root or
-  as the PHP-FPM account that will write the runtime files.
+- On Debian/Ubuntu VPSes, point DNS at the server first; the installer can
+  install Nginx/PHP-FPM/Certbot and configure the site. It requires PHP 8.2+.
+  Use `bash installer.sh --app-only` on shared hosting or managed web servers.
 - Keep `api/config.php` out of Git and release archives. The installer creates
   it on the server and puts data, sessions, and the admin hash outside the web
   root with restrictive permissions.
-- `public_base_url` **must** be the site's public HTTPS URL — Palplus rejects
-  `localhost` and private addresses, and it is where the callback URL points.
+- The installer derives `public_base_url` from the domain and enables live mode
+  by default. Pass `--sandbox` while testing. Palplus requires the public HTTPS
+  URL for callback URLs and rejects localhost/private addresses.
 - `palplus.channel_id` is optional but usually required: without a default
   payment channel on the Palplus account the API returns `400 NO_DEFAULT_CHANNEL`.
 - `palplus.auth_style` is `basic` by default, which sends

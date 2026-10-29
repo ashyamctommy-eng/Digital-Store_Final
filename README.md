@@ -24,8 +24,9 @@ npm run verify         # typecheck + lint + backend tests + cPanel build
 
 For a VPS installation using Nginx + PHP-FPM, see [DEPLOY-VPS.md](DEPLOY-VPS.md).
 For deployment setup, upload the release and run `bash installer.sh` from the
-server document root. It configures the initial admin login and private runtime
-storage; see [DEPLOY.md](DEPLOY.md) or [DEPLOY-VPS.md](DEPLOY-VPS.md) for steps.
+server document root. It asks for the domain and admin login, then fills in
+production defaults. On a Debian/Ubuntu VPS it also configures Nginx and HTTPS;
+see [DEPLOY.md](DEPLOY.md) or [DEPLOY-VPS.md](DEPLOY-VPS.md) for steps.
 
 ---
 
@@ -126,8 +127,11 @@ dist/
 
 Then, on the server:
 
-1. Run `bash installer.sh` from the document root. Set the admin email/password,
-   HTTPS URL, environment, external data directory, and PHP-FPM user.
+1. On a Debian/Ubuntu VPS, point DNS to the server, then run
+   `sudo bash installer.sh` from the document root. Enter the domain and admin login;
+   production URL, live mode, private storage, PHP-FPM, Nginx, and HTTPS are
+   configured automatically. Use `--sandbox` for test payments.
+   On shared hosting, use `bash installer.sh --app-only`.
 2. Sign in at `/admin` and add Palplus, NOWPayments, and other provider settings
    in Configurations.
 3. Point the Palplus channel callback and the NOWPayments IPN at

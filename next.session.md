@@ -20,7 +20,9 @@
 - Added verified-email order linking and a server-backed account order list. Only order summaries are returned in the list; credentials remain protected by the order retrieval token or the verified account's private ownership index. Account-owned orders can retrieve their delivery without the browser's old token.
 - Added VPS deployment and Nginx configuration notes in `DEPLOY-VPS.md` and `deploy/vps/nginx.conf`.
 - Replaced the admin Google-email allowlist and browser API-key prompts with installer-created email/password login, separate HttpOnly admin sessions, rate-limited login, CSRF checks on mutations, idle/absolute expiry, and logout.
-- Added `installer.sh` for the initial admin, HTTPS URL, sandbox/live mode, external data directory, and PHP-FPM user. It stores only a password hash outside the web root; `--reset-admin` preserves the existing config and store data.
+- Expanded `installer.sh` to ask only for the domain and admin login on a fresh install. It derives the HTTPS URL and Resend sender, defaults to live mode, detects PHP-FPM/private storage, and supports `--sandbox` and `--app-only`.
+- On root Debian/Ubuntu VPS installs, the installer can install Nginx/PHP-FPM/Certbot, configure a protected site, open UFW ports 80/443 when active, and request Let's Encrypt TLS. DNS must already point to the VPS; non-Debian/Ubuntu and shared-hosting deployments use `--app-only`.
+- The installer stores only a password hash outside the web root; `--reset-admin` preserves the existing config and store data. The Nginx/Apache release rules also block public access to `installer.sh`.
 - Updated the admin console and all admin API routes to use sessions, retaining `x-admin-key` only for legacy server-to-server requests. Updated cPanel/VPS deployment guides and added HTTP tests for login, cookies, CSRF, logout, and API-key-free session access.
 
 ## Safety State and Blockers
@@ -31,7 +33,7 @@
 - Order auto-linking requires a verified local PHP account and an exact normalized match to the ledger's `buyer_email`. Firebase/Google sessions do not establish a PHP account session and do not receive cross-device order access. Keep the original per-order token flow for guest and Firebase-only buyers.
 - Email signup requires Resend API key, verified sender address, and public HTTPS site URL configured on the VPS. Replit secrets do not transfer to the VPS.
 - Proxy refresh still depends on a documented/sanitized successful generation response and verified quota/retry behavior. Keep fulfillment and customer refresh blocked until those are confirmed.
-- After deployment, run `bash installer.sh` from the document root as root or the PHP-FPM account; run `bash installer.sh --reset-admin` to replace only the admin login.
+- After deployment, run `sudo bash installer.sh` on Debian/Ubuntu after DNS points at the VPS; use `bash installer.sh --app-only` for managed/shared hosting and `bash installer.sh --reset-admin` to replace only the admin login.
 
 ## Verification
 
@@ -41,6 +43,7 @@
   - Concurrency: 40 units claimed with no duplicate deliveries.
   - HTTP tests: 212 passed, including admin-session authorization, CSRF rejection, and logout.
 - The installer was exercised in a temporary release copy for fresh setup and admin reset; it created the hash-only credential file with mode 0600 and preserved `config.php` on reset.
+- Installer checks cover domain-to-HTTPS and Resend sender defaults, live and sandbox modes, isolated Nginx site generation, and rollback when certificate issuance fails. A full real-VPS Certbot issuance was not run from this workspace.
 - A live Novita API request using the configured runtime secrets returned valid JSON in the same format used by the draft endpoint. No secrets were printed or saved.
 - PHP lint, HTTP test shell syntax, and `git diff --check` pass.
 - The 12 changed TypeScript/TSX files pass a syntax-only parse. Full frontend typecheck and lint remain unverified because Next.js, React, Firebase, and ESLint dependencies are absent from the workspace install; the typecheck produces cascading missing-module errors. A previous dependency install was blocked by a security rejection.
@@ -61,7 +64,7 @@
 
 ## Next Actions
 
-1. Deploy the latest GitHub `main` branch to the fresh VPS using `DEPLOY-VPS.md`; no VPS deployment has happened yet. Run `bash installer.sh` before configuring providers.
+1. Deploy the latest GitHub `main` branch to the fresh VPS using `DEPLOY-VPS.md`; no VPS deployment has happened yet. Point DNS first, then run `sudo bash installer.sh` and configure provider keys.
 2. Configure and verify Resend on the VPS, then test signup, email verification and account-owned order retrieval on the public domain.
 3. Confirm GhostProxies' generate response and quota/idempotency behavior using a sanitized response before enabling proxy fulfillment or a customer proxy dashboard.
 4. Add automated offsite backups and a restore check before the VPS begins holding live orders.
