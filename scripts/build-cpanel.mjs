@@ -18,7 +18,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +27,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = path.join(root, "out");
 const distDir = path.join(root, "dist");
 const serverApiDir = path.join(root, "server", "api");
+const installerSrc = path.join(root, "installer.sh");
 const htaccessSrc = path.join(root, "deploy", "cpanel", ".htaccess");
 
 const log = (msg) => console.log(`  ${msg}`);
@@ -88,6 +89,13 @@ async function main() {
     throw new Error("server/api is missing — cannot produce a working payment bundle.");
   }
   await cp(serverApiDir, path.join(distDir, "api"), { recursive: true });
+  if (!existsSync(installerSrc)) {
+    throw new Error("installer.sh is missing — cannot prepare admin credentials for deployment.");
+  }
+  const installerDest = path.join(distDir, "installer.sh");
+  await cp(installerSrc, installerDest);
+  await chmod(installerDest, 0o755);
+  log("copied installer.sh (admin login + runtime configuration)");
 
   // The PHP test suite, its stubs and the concurrency harness are development
   // tools. They have no business on a production web root: they hold fixtures
@@ -109,14 +117,14 @@ async function main() {
   await mkdir(path.join(dataDir, "inventory"), { recursive: true });
   await writeFile(
     path.join(dataDir, ".gitkeep"),
-    "# Order ledger. Must stay writable by PHP (chmod 755 or 775).\n"
+    "# Development fallback only. installer.sh configures private external storage.\n"
   );
   await writeFile(
     path.join(dataDir, "inventory", ".gitkeep"),
-    "# Stock queue. Must stay writable by PHP (chmod 755 or 775).\n"
+    "# Development fallback only. installer.sh configures private external storage.\n"
   );
   log("copied PHP payment API → dist/api/");
-  log("created dist/api/data/ + inventory (set permissions after upload)");
+  log("created development fallback data directories (installer uses private external storage)");
 
   // Never ship a config with real keys in the bundle; only the sample.
   const configPath = path.join(distDir, "api", "config.php");
@@ -169,18 +177,18 @@ async function main() {
   ----------
   1. Upload the CONTENTS of dist/ to your domain's document root
      (usually public_html/) via cPanel File Manager or FTP.
-  2. On the server: copy dist/api/config.sample.php to dist/api/config.php
-     and fill in your Palplus + NOWPayments keys and public_base_url.
-     Optional: smsotp.api_key enables on-demand SMS numbers. Proxy products
-     have no provider — upload their IP:PORT stock in the admin console.
-  3. chmod 755 (or 775) dist/api/data AND dist/api/data/inventory so PHP can
-     write the order ledger and the credential queue.
+  2. In the document root, run the installer as root (VPS) or the PHP-FPM
+     account (shared hosting): sudo bash installer.sh
+     Set the admin email/password, public URL, environment, private data path,
+     and PHP-FPM user. The installer creates config.php and stores only a
+     password hash outside the web root.
+  3. Sign in at /admin, then add payment/provider credentials under
+     Configurations. Do not paste keys into this installer or README.
   4. Point the Palplus channel callback and the NOWPayments IPN at
      https://<your-domain>/api/palplus/webhook
      https://<your-domain>/api/nowpayments/webhook
   5. Visit /api/config-status to confirm the gateways report "configured".
-  6. In the admin console, check Integrations for the SMS balance and the
-     proxy pool status, and Stock & Credentials to load your first batch.
+  6. In the admin console, check Integrations and Stock & Credentials.
 `);
 }
 

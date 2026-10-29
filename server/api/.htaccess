@@ -14,6 +14,7 @@ Options -Indexes
   # the order ledger. None of these may ever be fetched over HTTP.
   RewriteRule ^lib/ - [F,L]
   RewriteRule ^data/ - [F,L]
+  RewriteRule (^|/)\. - [F,L]
   RewriteRule ^config\.php$ - [F,L]
   RewriteRule ^config\.sample\.php$ - [F,L]
   RewriteRule ^tests/ - [F,L]

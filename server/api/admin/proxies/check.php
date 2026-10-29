@@ -1,6 +1,6 @@
 <?php
 /**
- * POST /api/admin/proxies/check        (admin key required)
+ * POST /api/admin/proxies/check        (admin session or legacy key required)
  *
  * Tests proxies and ranks them, so stock can be judged before it is sold.
  *

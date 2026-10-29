@@ -1,6 +1,6 @@
 <?php
 /**
- * POST /api/admin/settings/test        (admin key required)
+ * POST /api/admin/settings/test        (admin session or legacy key required)
  *
  * "Does this credential actually work?" — asked against the live provider rather
  * than assumed. Pasting a key and hoping is how a store finds out at checkout

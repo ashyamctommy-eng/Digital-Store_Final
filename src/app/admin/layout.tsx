@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/context/AuthContext";
-import { ADMIN_EMAILS, BRAND } from "@/lib/config";
+import { BRAND } from "@/lib/config";
+import { adminAuthMe, adminLogin, adminLogout } from "@/lib/adminApi";
 import Icon from "@/components/ui/Icon";
 import type { IconName } from "@/components/ui/Icon";
 
@@ -21,10 +21,72 @@ const navItems: { href: string; label: string; icon: IconName }[] = [
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, signInWithGoogle, signOut } = useAuth();
+  const [user, setUser] = useState<{ email: string } | null>(null);
+  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [loading, setLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [error, setError] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const pathname = usePathname();
+
+  useEffect(() => {
+    let active = true;
+    const loadSession = async () => {
+      const result = await adminAuthMe();
+      if (!active) return;
+      if (result.ok && result.data) {
+        setConfigured(result.data.configured);
+        setUser(result.data.user);
+      } else {
+        setError(result.error ?? "Could not check administrator access.");
+      }
+      setLoading(false);
+    };
+    const handleExpired = () => {
+      setUser(null);
+      setPassword("");
+      setError("Your administrator session expired. Sign in again.");
+    };
+    window.addEventListener("admin-session-expired", handleExpired);
+    void loadSession();
+    return () => {
+      active = false;
+      window.removeEventListener("admin-session-expired", handleExpired);
+    };
+  }, []);
+
+  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError("");
+    const result = await adminLogin(email, password);
+    setSubmitting(false);
+    if (result.ok && result.data?.user) {
+      setConfigured(true);
+      setUser(result.data.user);
+      setPassword("");
+      return;
+    }
+    if (result.errorCode === "ADMIN_NOT_CONFIGURED" || result.status === 503) {
+      setConfigured(false);
+      setError("Admin login is not set up yet. Run installer.sh on the server.");
+      return;
+    }
+    setError(result.error ?? "Invalid email or password.");
+  };
+
+  const handleLogout = async () => {
+    const result = await adminLogout();
+    if (result.ok) {
+      setUser(null);
+      setPassword("");
+      setError("");
+    } else {
+      setError(result.error ?? "Could not sign out.");
+    }
+  };
 
   /* ------------------------- Auth gates ------------------------- */
   if (loading) {
@@ -46,7 +108,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </span>
           <h1 className="text-lg font-extrabold mt-3">Admin Access</h1>
           <p className="text-sm text-[var(--color-ink-soft)] mt-1">
-            Sign in with an authorised staff account.
+            Sign in with the administrator account configured on this server.
           </p>
 
           {error && (
@@ -55,20 +117,43 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </p>
           )}
 
-          <button
-            type="button"
-            onClick={async () => {
-              setError("");
-              try {
-                await signInWithGoogle();
-              } catch {
-                setError("Sign-in failed. Please try again.");
-              }
-            }}
-            className="mt-5 w-full py-3 rounded-xl bg-[var(--color-brand)] hover:bg-[var(--color-brand-strong)] text-white text-sm font-bold transition-colors"
-          >
-            Continue with Google
-          </button>
+          {configured === false ? (
+            <p className="mt-5 rounded-xl border border-[var(--color-warning)]/30 bg-[var(--color-warning)]/10 p-3 text-left text-xs text-[var(--color-ink-soft)]">
+              Run <code>bash installer.sh</code> on the server to create the first admin login.
+            </p>
+          ) : (
+            <form onSubmit={handleLogin} className="mt-5 space-y-3 text-left">
+              <label className="block text-xs font-bold">
+                Email
+                <input
+                  type="email"
+                  autoComplete="username"
+                  required
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-page)] px-3 py-2.5 text-sm font-normal"
+                />
+              </label>
+              <label className="block text-xs font-bold">
+                Password
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-[var(--color-line)] bg-[var(--color-page)] px-3 py-2.5 text-sm font-normal"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full rounded-xl bg-[var(--color-brand)] py-3 text-sm font-bold text-white transition-colors hover:bg-[var(--color-brand-strong)] disabled:opacity-60"
+              >
+                {submitting ? "Signing in…" : "Sign in"}
+              </button>
+            </form>
+          )}
 
           <Link
             href="/"
@@ -76,40 +161,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           >
             ← Back to store
           </Link>
-        </div>
-      </div>
-    );
-  }
-
-  const isAdmin =
-    user.authProvider === "firebase" &&
-    !!user.email &&
-    ADMIN_EMAILS.includes(user.email.toLowerCase());
-
-  if (!isAdmin) {
-    return (
-      <div className="min-h-dvh flex items-center justify-center px-4">
-        <div className="w-full max-w-sm bg-[var(--color-panel)] rounded-2xl border border-[var(--color-line)] shadow-sm p-6 text-center">
-          <h1 className="text-lg font-extrabold">Access Denied</h1>
-          <p className="text-sm text-[var(--color-ink-soft)] mt-1">
-            <span className="font-bold text-[var(--color-ink)]">{user.email}</span>{" "}
-            is not an authorised admin.
-          </p>
-          <div className="mt-5 flex gap-2">
-            <button
-              type="button"
-              onClick={() => signOut()}
-              className="flex-1 py-2.5 rounded-xl border border-[var(--color-line)] text-xs font-bold uppercase tracking-wider hover:bg-[var(--color-line)] transition-colors"
-            >
-              Sign Out
-            </button>
-            <Link
-              href="/"
-              className="flex-1 py-2.5 rounded-xl bg-[var(--color-brand)] text-white text-xs font-bold uppercase tracking-wider text-center"
-            >
-              Store
-            </Link>
-          </div>
         </div>
       </div>
     );
@@ -174,11 +225,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </Link>
           <div className="flex items-center gap-2">
             <div className="w-7 h-7 rounded-full bg-[var(--color-brand)] flex items-center justify-center text-xs font-bold text-white">
-              {(user.displayName || user.email || "A").charAt(0).toUpperCase()}
+              {user.email.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium truncate">
-                {user.displayName || "Admin"}
+                Admin
               </p>
               <p className="text-[10px] text-[var(--color-ink-faint)] truncate">
                 {user.email}
@@ -186,7 +237,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             </div>
             <button
               type="button"
-              onClick={() => signOut()}
+              onClick={() => void handleLogout()}
               className="p-1.5 rounded-full text-[var(--color-ink-faint)] hover:text-[var(--color-brand)] hover:bg-[var(--color-line)] transition-colors"
               title="Sign out"
             >

@@ -11,9 +11,7 @@ import {
   adminDeleteUnit,
   adminListStock,
   adminSmsotpStatus,
-  getAdminKey,
   parseCredentialLines,
-  setAdminKey,
   type InventoryAddResponse,
   type InventoryDryRunResponse,
   type InventoryListResponse,
@@ -21,10 +19,6 @@ import {
 } from "@/lib/adminApi";
 
 export default function AdminInventoryPage() {
-  const [key, setKey] = useState("");
-  const [unlocked, setUnlocked] = useState(false);
-  const [authError, setAuthError] = useState("");
-
   const [productId, setProductId] = useState(products.find((product) => !isProxyProduct(product))?.id ?? "");
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -39,29 +33,15 @@ export default function AdminInventoryPage() {
   const [deletingUnit, setDeletingUnit] = useState("");
   const [deleteError, setDeleteError] = useState("");
 
-  // Restore the key from this tab's session storage. Reads happen inside an
-  // async body because sessionStorage only exists in the browser, so this
-  // cannot be a lazy useState initialiser without breaking hydration.
   useEffect(() => {
-    let cancelled = false;
     const requestedProduct = new URLSearchParams(window.location.search).get("productId");
     if (requestedProduct && products.some((product) => product.id === requestedProduct && !isProxyProduct(product))) {
       setProductId(requestedProduct);
     }
-    (async () => {
-      const stored = getAdminKey();
-      if (cancelled || !stored) return;
-      setKey(stored);
-      setUnlocked(true);
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
-  // Load the stock summary whenever we unlock or a manual refresh is requested.
+  // The parent admin layout has already authenticated this session.
   useEffect(() => {
-    if (!unlocked) return;
     let cancelled = false;
 
     (async () => {
@@ -83,21 +63,17 @@ export default function AdminInventoryPage() {
       setListError(res.error ?? "Could not load stock.");
 
       if (res.status === 401 || res.errorCode === "UNAUTHORIZED") {
-        setUnlocked(false);
-        setAuthError("That admin key was rejected. Check admin_api_key in config.php.");
+        setListError("Your administrator session expired. Sign in again.");
       }
       if (res.errorCode === "ADMIN_NOT_CONFIGURED") {
-        setUnlocked(false);
-        setAuthError(
-          "No admin key is set on the server yet. Add admin_api_key to server/api/config.php."
-        );
+        setListError("Admin login is not configured. Run installer.sh on the server.");
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [unlocked, refreshNonce]);
+  }, [refreshNonce]);
 
   const refreshList = useCallback(() => setRefreshNonce((n) => n + 1), []);
 
@@ -118,17 +94,6 @@ export default function AdminInventoryPage() {
   const needsReview = parsed.filter((p) => !p.wellFormed);
 
   const currentStock = list?.products.find((p) => p.product_id === productId);
-
-  const unlock = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError("");
-    if (!key.trim()) {
-      setAuthError("Enter the admin key.");
-      return;
-    }
-    setAdminKey(key.trim());
-    setUnlocked(true);
-  };
 
   const handleSubmit = async () => {
     if (!productId || !text.trim()) return;
@@ -185,54 +150,6 @@ export default function AdminInventoryPage() {
     "w-full px-3.5 py-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-page)] text-sm outline-none focus:border-[var(--color-brand)]";
   const card = "bg-[var(--color-panel)] rounded-2xl border border-[var(--color-line)] p-5";
   const label = "block text-[10px] font-bold uppercase tracking-wider text-[var(--color-ink-faint)] mb-1.5";
-
-  /* ---------------------------- Lock screen ---------------------------- */
-  if (!unlocked) {
-    return (
-      <div className="max-w-md mx-auto mt-10">
-        <div className={card}>
-          <div className="flex items-center gap-2 mb-1">
-            <Icon name="shield" className="w-5 h-5 text-[var(--color-brand)]" />
-            <h1 className="text-lg font-extrabold">Stock Management</h1>
-          </div>
-          <p className="text-sm text-[var(--color-ink-soft)] mb-5">
-            Enter the admin API key configured in{" "}
-            <code>server/api/config.php</code>.
-          </p>
-
-          {authError && (
-            <p className="mb-4 text-[11px] text-[var(--color-danger)] bg-[var(--color-danger)]/10 border border-[var(--color-danger)]/25 rounded-xl p-3 leading-relaxed">
-              {authError}
-            </p>
-          )}
-
-          <form onSubmit={unlock} className="space-y-3">
-            <div>
-              <label className={label}>Admin key</label>
-              <input
-                type="password"
-                value={key}
-                onChange={(e) => setKey(e.target.value)}
-                placeholder="Paste the admin_api_key"
-                className={inputClass}
-              />
-            </div>
-            <button
-              type="submit"
-              className="w-full py-3 rounded-xl bg-[var(--color-brand)] hover:bg-[var(--color-brand-strong)] text-white text-sm font-bold transition-colors"
-            >
-              Unlock
-            </button>
-          </form>
-
-          <p className="mt-4 text-[10px] text-[var(--color-ink-faint)] leading-relaxed">
-            The key is kept in this browser tab only and never leaves the site&apos;s
-            own API. It is not the same as your sign-in.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   /* ------------------------------ Console ------------------------------ */
   return (

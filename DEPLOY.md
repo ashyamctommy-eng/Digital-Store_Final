@@ -15,9 +15,9 @@ deploy. (Git deployment is covered in `DEPLOY.md`.)
 | --- | --- |
 | Your domain pointing at the hosting | The site is served from the document root |
 | **SSL active** (padlock on `https://`) | Palplus rejects plain HTTP callbacks; the `.htaccess` forces HTTPS |
-| **PHP 8.0 or newer** (8.1+ is better) | The code uses `match`, `str_contains`, `array_is_list` |
+| **PHP 8.2 or newer** | Required by the API and the setup installer |
 | PHP extensions: `curl`, `json`, `hash` | Talking to the gateways and signing webhooks. `mbstring` is used if present but not required |
-| A **new admin key** | Printed below; you will paste it once |
+| SSH or the hosting terminal | Run `installer.sh` as the PHP-FPM account (or with sudo) |
 
 You do not need a database. Orders, stock and settings are JSON files.
 
@@ -50,11 +50,10 @@ public_html/
 ├── products/          ← one folder per product page
 ├── account/
 ├── admin/
+├── installer.sh       ← creates private runtime config and admin login
 └── api/               ← the PHP backend
     ├── .htaccess
     ├── config.sample.php
-    ├── data/
-    │   └── inventory/
     ├── lib/
     ├── admin/
     ├── orders/
@@ -65,68 +64,50 @@ public_html/
 
 ---
 
-## Step 2 — Create `config.php`
+## Step 2 — Run the installer
 
-This file is deliberately **not** in the zip: it holds your admin key, and a key
-in a shared archive is a key on the internet. You create it once, on the server.
-
-The bundle ships `api/config.sample.php` with every key documented. The quickest
-safe route is to copy it and edit two lines.
-
-**Option A — File Manager**
-
-1. Select `api/config.sample.php` → **Copy** → destination `api/config.php`.
-2. Right-click `api/config.php` → **Edit**.
-3. Change these two values and save:
-
-```php
-    // Generate your own; see below.
-    'admin_api_key' => 'PASTE_YOUR_GENERATED_KEY',
-
-    // Usually already correct. Leave it unless you are moving the ledger.
-    'data_dir' => __DIR__ . '/data',
-```
-
-Everything else in that file can stay empty — you will fill it in from the
-console in Step 5.
-
-**Generate the admin key.** In hPanel open **Advanced → Terminal**, or use SSH:
+Open the hosting terminal or connect with SSH, then run the installer from the
+document root:
 
 ```bash
-php -r "echo bin2hex(random_bytes(24));"
+cd ~/public_html
+bash installer.sh
 ```
 
-If you have neither, run that line on any machine with PHP, or use a password
-manager to generate a 48-character random hex string. **Keep a copy** — it is how
-you unlock the configuration screen. It is also the only thing standing between
-the internet and your gateway keys, so do not use something guessable.
+The installer asks for the administrator email and password, public HTTPS URL,
+environment (`sandbox` or `live`), private data directory, and PHP-FPM user.
+Use a password of at least 14 characters. Password entry is hidden; the script
+stores only a password hash and writes the admin credentials to the private data
+directory. Provider API keys are not requested here.
 
-> Changing `admin_api_key` later means editing this file again. It is
-> intentionally impossible to change from the console: a mistyped save there
-> would lock you out of the only screen that could fix it.
+The data directory must be outside `public_html`. On shared hosting, run the
+installer as the same account PHP-FPM uses. If your host requires a separate
+system user or root permissions to create that directory, ask the host to
+provide a private writable directory before continuing.
+
+To replace only the admin email/password later, run:
+
+```bash
+bash installer.sh --reset-admin
+```
+
+This preserves the store settings and runtime data.
 
 ---
 
-## Step 3 — Set permissions
+## Step 3 — Verify private storage
 
-PHP writes orders, stock and settings into `api/data/`. If it cannot, payments
-appear to succeed and then nothing is delivered.
-
-Recommended: **755 on directories, 644 on files.**
-
-**File Manager:** select `api/data` → right-click → **Permissions** → `755` →
-tick **Recurse into subdirectories** → apply. Do the same for `api/data/inventory`.
-
-**Terminal / SSH** (from your document root):
+The installer creates the external data directory with restricted permissions
+and assigns it to PHP-FPM. Do not run recursive `chmod` commands on the site or
+data directory. Confirm the owner and permissions from SSH:
 
 ```bash
-chmod 755 api/data api/data/inventory
-find . -type d -exec chmod 755 {} \;
-find . -type f -exec chmod 644 {} \;
+ls -ld /path/printed/by/installer
+ls -l /path/printed/by/installer/admin-credentials.json
 ```
 
-Some shared hosts run PHP as a different user than your cPanel account. If
-Step 6 reports the data directory as not writable, use `775` instead of `755`.
+The credential file should be readable only by its owner; the directory should
+not be accessible to other users.
 
 ---
 
@@ -148,23 +129,20 @@ Step 6 reports the data directory as not writable, use `775` instead of `755`.
 ```
 
 The two things to confirm **now** are `"data_dir_writable":true` and a
-`php_version` of 8.0 or higher. If `data_dir_writable` is `false`, go back to
-Step 3 — nothing will work until it is true.
+`php_version` of 8.2 or higher. If the data directory is not writable, correct
+the PHP-FPM owner/group on the external directory before continuing.
 
 ---
 
 ## Step 5 — Configure everything in the console
 
-Open `https://your-domain/admin/` and sign in with one of the two Google
-accounts listed in `ADMIN_EMAILS` (in `src/lib/config.ts`):
+Open `https://your-domain/admin/` and sign in with the administrator email and
+password entered in the installer. Admin access is protected by a server-side
+session cookie; the browser does not store an admin API key.
 
-- `wildpharmtech9@gmail.com`
-- `ashyamctommy@gmail.com`
-
-Then choose **Configurations** in the sidebar. To change who can get in, edit
-that list and rebuild.
-
-Paste your admin key when prompted. It is kept in that browser tab only.
+Then choose **Configurations** in the sidebar to add payment and provider
+credentials. To change the administrator email/password, run
+`bash installer.sh --reset-admin` on the server.
 
 Now fill in each section. After every one, press **Test connection** — it checks
 against the live provider and tells you what is actually wrong.
@@ -255,7 +233,8 @@ Firestore `orders` collection from the browser, and the admin console read that
 collection. That was removed: the browser was supplying the shop's record of a
 sale, so a forged document looked like a real order, and the list the admin saw
 was not the list the webhooks settled against. Orders now live only in the PHP
-ledger you just uploaded, and the admin screens read it through the admin key.
+ledger you just uploaded, and the admin screens read it through an authenticated
+server-side admin session.
 Nothing in the store reads or writes Firestore any more, so there is nothing to
 grant. Google sign-in still works — Firebase Auth is a separate product and is
 unaffected by these rules.
@@ -292,7 +271,7 @@ cheapest product in your own store, and check:
 2. The order flips to paid.
 3. The credentials appear under **Account → My Orders**.
 4. The email arrives (check spam).
-5. `api/data/` on the server contains a new order file.
+5. The external data directory configured by the installer contains a new order file.
 
 ---
 
@@ -303,9 +282,9 @@ cheapest product in your own store, and check:
 | Every URL shows the homepage | A blanket SPA rewrite is active. The shipped `.htaccess` deliberately has it commented out; do not enable it |
 | Deep links 404, homepage works | `.htaccess` was not uploaded (hidden files were off) or `AllowOverride` is disabled on the host |
 | `{"error":"CONFIG_MISSING"}` on every API call | `api/config.php` does not exist — Step 2 |
-| `data_dir_writable: false` | Step 3; try 775 |
-| API returns 500 | Almost always a missing `config.php` or an unwritable `api/data`. Check hPanel → **Advanced → Error Log** |
-| "Could not save" in Configurations | `api/data` is not writable |
+| `data_dir_writable: false` | Check the external data directory owner and permissions from Step 3 |
+| API returns 500 | Check that `config.php` exists and PHP-FPM can read the external data directory; see hPanel → **Advanced → Error Log** |
+| "Could not save" in Configurations | The PHP-FPM account cannot write the external data directory |
 | Payments fail with `NO_DEFAULT_CHANNEL` | Set a default payment channel in the Palplus console |
 | Payments fail with `INSUFFICIENT_SERVICE_BALANCE` | Top up the Palplus service wallet |
 | Customer paid, nothing delivered | The webhook URL is wrong, or the NOWPayments IPN secret is missing |
@@ -316,10 +295,10 @@ cheapest product in your own store, and check:
 
 ## After launch
 
-- **Back up `api/data/` regularly.** It holds every order, the stock queue and
-  your gateway settings. A weekly download via File Manager is enough.
-- **`api/config.php` is your recovery key.** If the console is ever inaccessible,
-  that file still gets you in.
+- **Back up the external data directory regularly.** It holds the admin hash,
+  orders, stock queues, and gateway settings.
+- **Keep `api/config.php` private.** The installer creates it; it is not an
+  admin login fallback. Use `bash installer.sh --reset-admin` if access is lost.
 - **Rotate credentials periodically.** The Palplus console can issue a new key;
   paste it into Configurations and the store switches over without a redeploy.
 - **Re-run the bundle check before any future upload** — `npm run verify:bundle`

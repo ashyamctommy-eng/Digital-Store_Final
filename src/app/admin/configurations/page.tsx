@@ -5,7 +5,6 @@ import {
   adminGetSettings,
   adminSaveSettings,
   adminTestIntegration,
-  setAdminKey,
   type IntegrationTestResult,
   type SettingField,
   type SettingGroup,
@@ -23,10 +22,9 @@ import {
  * validation messages all come from one place and cannot drift from the settings
  * the backend actually accepts.
  *
- * Two deliberate omissions: `admin_api_key` and `data_dir` are not editable
- * here. The admin key is what authorises this page — a bad save would lock you
- * out of the only tool that could undo it — and both stay recoverable by hand in
- * `config.php`.
+ * Bootstrap administrator credentials and `data_dir` are not editable here.
+ * The installer manages the login; the data path is fixed so the console cannot
+ * move the files it is currently reading.
  */
 
 /** Which integration's "Test connection" belongs to a group. */
@@ -51,8 +49,6 @@ export default function AdminConfigurationsPage() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [testing, setTesting] = useState("");
   const [testResults, setTestResults] = useState<Record<string, IntegrationTestResult>>({});
-  const [keyDraft, setKeyDraft] = useState("");
-  const [needsKey, setNeedsKey] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,42 +57,18 @@ export default function AdminConfigurationsPage() {
     if (res.ok && res.data) {
       setData(res.data);
       setError("");
-      setNeedsKey(false);
       return;
     }
     if (res.status === 401) {
-      setNeedsKey(true);
-      setError("");
-      return;
-    }
-    if (res.status === 503) {
-      setError(
-        "admin_api_key is not set in api/config.php yet. Set it on the server, then reload."
-      );
+      setError("Your administrator session expired. Sign in again.");
       return;
     }
     setError(res.error ?? "Could not load the configuration.");
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    adminGetSettings().then((res) => {
-      if (cancelled) return;
-      if (res.ok && res.data) {
-        setData(res.data);
-        return;
-      }
-      if (res.status === 401) setNeedsKey(true);
-      else if (res.status === 503) {
-        setError(
-          "admin_api_key is not set in api/config.php yet. Set it on the server, then reload."
-        );
-      } else setError(res.error ?? "Could not load the configuration.");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void load();
+  }, [load]);
 
   const dirtyKeys = useMemo(() => Object.keys(draft), [draft]);
 
@@ -170,45 +142,6 @@ export default function AdminConfigurationsPage() {
     "bg-[var(--color-panel)] rounded-2xl border border-[var(--color-line)] p-5";
   const input =
     "w-full px-3 py-2 rounded-xl bg-[var(--color-page)] border border-[var(--color-line)] text-sm focus:outline-none focus:border-[var(--color-brand)]";
-
-  /* ----------------------------------------------------------- admin key gate */
-  if (needsKey) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-2xl font-extrabold mb-1">Configurations</h1>
-        <p className="text-sm text-[var(--color-ink-soft)] mb-5">
-          Enter the admin key from <code>api/config.php</code> to manage gateway
-          credentials.
-        </p>
-        <div className={card}>
-          <input
-            type="password"
-            value={keyDraft}
-            onChange={(e) => setKeyDraft(e.target.value)}
-            placeholder="Paste the admin_api_key"
-            autoComplete="off"
-            className={input}
-          />
-          <button
-            type="button"
-            onClick={() => {
-              setAdminKey(keyDraft.trim());
-              setNeedsKey(false);
-              void load();
-            }}
-            disabled={keyDraft.trim() === ""}
-            className="mt-3 w-full px-4 py-2.5 rounded-xl bg-[var(--color-brand)] hover:bg-[var(--color-brand-strong)] text-white text-sm font-bold transition-colors disabled:opacity-50"
-          >
-            Unlock
-          </button>
-          <p className="text-[11px] text-[var(--color-ink-faint)] mt-3 leading-relaxed">
-            Kept in this browser tab only. It is a shared secret, not a user
-            account — anyone with it can change these settings.
-          </p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div>
@@ -398,11 +331,9 @@ export default function AdminConfigurationsPage() {
               </span>
             </label>
             <p className="text-[11px] text-[var(--color-ink-faint)] mt-2 leading-relaxed">
-              <code>admin_api_key</code> and <code>data_dir</code> are not
-              editable here on purpose: the admin key is what authorises this
-              page, so a bad value would lock you out. Edit them in{" "}
-              <code>api/config.php</code> on the server if you need to change
-              them.
+              Admin login credentials are managed by <code>installer.sh</code>.
+              The data directory is also fixed here so a settings change cannot
+              move orders or inventory.
             </p>
           </div>
         </div>

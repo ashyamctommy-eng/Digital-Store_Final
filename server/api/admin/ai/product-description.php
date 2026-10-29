@@ -1,6 +1,6 @@
 <?php
 /**
- * POST /api/admin/ai/product-description (admin key required)
+ * POST /api/admin/ai/product-description (admin session or legacy key required)
  *
  * Creates an editable product-description draft. It never saves or publishes
  * catalog content.

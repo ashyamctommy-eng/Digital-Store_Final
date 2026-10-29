@@ -1,6 +1,6 @@
 <?php
 /**
- * POST /api/admin/inventory/add      (admin key required)
+ * POST /api/admin/inventory/add      (admin session or legacy key required)
  *
  * Bulk credential upload. The admin pastes one unit per line; each is parsed
  * and appended to the `inventory_stock` queue for that product as `available`.

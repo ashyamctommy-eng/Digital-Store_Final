@@ -14,8 +14,6 @@ import {
   adminGenerateProductDescription,
   adminSaveCatalogProduct,
   adminSetCatalogActive,
-  getAdminKey,
-  setAdminKey,
   type InventoryListResponse,
 } from "@/lib/adminApi";
 
@@ -59,8 +57,6 @@ export default function AdminProductsPage() {
   const [inventory, setInventory] = useState<InventoryListResponse | null>(null);
   const [inventoryError, setInventoryError] = useState("");
   const [catalogError, setCatalogError] = useState("");
-  const [apiKeyDraft, setApiKeyDraft] = useState("");
-  const [needsApiKey, setNeedsApiKey] = useState(false);
   const [formError, setFormError] = useState("");
   const [descriptionError, setDescriptionError] = useState("");
   const [generatingDescription, setGeneratingDescription] = useState(false);
@@ -71,7 +67,6 @@ export default function AdminProductsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    setNeedsApiKey(!getAdminKey());
     void Promise.all([adminListStock(), adminListCatalog()]).then(([stockRes, catalogRes]) => {
       if (cancelled) return;
       if (stockRes.ok && stockRes.data) {
@@ -83,11 +78,9 @@ export default function AdminProductsPage() {
       if (catalogRes.ok && catalogRes.data) {
         setList(catalogRes.data.products);
         setCatalogError("");
-        setNeedsApiKey(false);
         setLastRefresh(Date.now());
       } else {
         setCatalogError(catalogRes.error ?? "Could not load the saved catalog.");
-        if (catalogRes.status === 401) setNeedsApiKey(true);
       }
     });
     return () => {
@@ -246,7 +239,6 @@ export default function AdminProductsPage() {
           ? "Could not reach the store API."
           : res.error;
         setDescriptionError(message ?? "Could not generate a description.");
-        if (res.status === 401) setNeedsApiKey(true);
         return;
       }
       setForm((current) => ({ ...current, description: res.data!.description }));
@@ -266,14 +258,6 @@ export default function AdminProductsPage() {
     }
     setList(res.data.products);
     setLastRefresh(Date.now());
-  };
-
-  const unlockAdminApi = (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!apiKeyDraft.trim()) return;
-    setAdminKey(apiKeyDraft.trim());
-    setNeedsApiKey(false);
-    setRefreshStock((value) => value + 1);
   };
 
   const inputClass =
@@ -348,23 +332,6 @@ export default function AdminProductsPage() {
         </div>
       </div>
 
-      {needsApiKey && (
-        <form onSubmit={unlockAdminApi} className="mb-5 bg-[var(--color-panel)] border border-[var(--color-line)] rounded-xl p-4 flex flex-wrap items-end gap-3">
-          <label className="flex-1 min-w-[220px]">
-            <span className={labelClass}>Admin API key</span>
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={apiKeyDraft}
-              onChange={(event) => setApiKeyDraft(event.target.value)}
-              className={inputClass}
-            />
-          </label>
-          <button type="submit" className="px-4 py-2.5 rounded-xl bg-[var(--color-brand)] text-white text-xs font-bold">
-            Unlock product controls
-          </button>
-        </form>
-      )}
       <div className="mb-5 rounded-xl border border-[var(--color-line)] bg-[var(--color-panel)] p-3">
         <p className="text-[11px] text-[var(--color-ink-soft)] leading-relaxed">
           Saved product changes appear in the storefront without rebuilding. Removing a product hides it from new sales but keeps its catalog record for existing orders. Inventory is managed separately.
@@ -637,7 +604,7 @@ export default function AdminProductsPage() {
                   <button
                     type="button"
                     onClick={() => void handleGenerateDescription()}
-                    disabled={generatingDescription || !getAdminKey()}
+                    disabled={generatingDescription}
                     className="mb-1 rounded-lg border border-[var(--color-brand)]/30 px-2.5 py-1.5 text-[10px] font-bold text-[var(--color-brand)] hover:bg-[var(--color-brand)]/10 disabled:opacity-50"
                   >
                     {generatingDescription ? "Generating…" : "Draft with Novita"}

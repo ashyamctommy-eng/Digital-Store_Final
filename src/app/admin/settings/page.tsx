@@ -239,11 +239,9 @@ export default function AdminSettingsPage() {
             className="w-4 h-4 text-[var(--color-success)] flex-shrink-0 mt-0.5"
           />
           <p className="text-[11px] text-[var(--color-ink-soft)] leading-relaxed">
-            Admin access is now gated by Google sign-in against an allowlist in{" "}
-            <code>src/lib/config.ts</code>. The old stored-credential and OTP
-            flow was removed — it kept passwords in the browser, which is not
-            safe. Enforce the same allowlist in your Firestore security rules,
-            since a client-side gate can be bypassed.
+            Admin access uses the email/password created by <code>installer.sh</code>
+            and a server-side session cookie. The browser does not keep an admin
+            API key or password.
           </p>
         </div>
       </div>

@@ -6,8 +6,6 @@ import { formatPrice } from "@/lib/currency";
 import {
   adminListOrders,
   adminListStock,
-  getAdminKey,
-  setAdminKey,
   type AdminOrdersResponse,
   type InventoryListResponse,
 } from "@/lib/adminApi";
@@ -17,9 +15,6 @@ import { products } from "@/lib/products";
 const LOW_STOCK_LIMIT = 10;
 
 export default function AdminDashboard() {
-  const [unlocked, setUnlocked] = useState(false);
-  const [keyDraft, setKeyDraft] = useState("");
-  const [authError, setAuthError] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [orders, setOrders] = useState<AdminOrdersResponse | null>(null);
@@ -28,33 +23,12 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      const stored = getAdminKey();
-      if (!cancelled && stored) setUnlocked(true);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!unlocked) return;
-    let cancelled = false;
     setLoading(true);
     void Promise.all([adminListOrders({ limit: 10 }), adminListStock()]).then(
       ([orderResult, stockResult]) => {
         if (cancelled) return;
         setLoading(false);
 
-        const unauthorized = [orderResult, stockResult].some(
-          (result) => result.status === 401 || result.errorCode === "UNAUTHORIZED"
-        );
-        if (unauthorized) {
-          setAdminKey("");
-          setUnlocked(false);
-          setAuthError("That admin key was rejected. Enter the key configured on the server.");
-          return;
-        }
         if (orderResult.ok && orderResult.data) setOrders(orderResult.data);
         if (stockResult.ok && stockResult.data) setStock(stockResult.data);
         const failures = [orderResult, stockResult]
@@ -67,7 +41,7 @@ export default function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [unlocked, refreshNonce]);
+  }, [refreshNonce]);
 
   const stockByProduct = new Map(
     (stock?.products ?? []).map((row) => [row.product_id, row.available])
@@ -81,47 +55,6 @@ export default function AdminDashboard() {
     .sort((a, b) => a.available - b.available);
   const recentOrders = (orders?.orders ?? []).map(toAdminOrderView);
   const pending = orders?.totals.counts.pending ?? 0;
-
-  const unlock = (event: React.FormEvent) => {
-    event.preventDefault();
-    const value = keyDraft.trim();
-    if (!value) {
-      setAuthError("Enter the admin key.");
-      return;
-    }
-    setAdminKey(value);
-    setAuthError("");
-    setUnlocked(true);
-  };
-
-  if (!unlocked) {
-    return (
-      <div className="max-w-md">
-        <h1 className="text-2xl font-extrabold text-[var(--color-charcoal)]">Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1 mb-5">Unlock store operations and order summaries.</p>
-        <form onSubmit={unlock} className="bg-white rounded-xl border p-5">
-          {authError && <p className="text-xs text-red-700 mb-3">{authError}</p>}
-          <label htmlFor="dashboard-admin-key" className="block text-xs font-bold mb-1.5">
-            Admin API key
-          </label>
-          <input
-            id="dashboard-admin-key"
-            type="password"
-            autoComplete="current-password"
-            value={keyDraft}
-            onChange={(event) => setKeyDraft(event.target.value)}
-            className="w-full rounded-lg border px-3 py-2 text-sm"
-          />
-          <button
-            type="submit"
-            className="w-full mt-3 rounded-lg bg-[var(--color-brand)] px-4 py-2.5 text-sm font-bold text-white"
-          >
-            Unlock dashboard
-          </button>
-        </form>
-      </div>
-    );
-  }
 
   const stats = [
     { label: "Lifetime revenue", value: orders ? formatPrice(orders.totals.revenue_usd, "USD") : "—" },

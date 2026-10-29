@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   adminGhostProxies,
-  setAdminKey,
   type GhostProxiesResponse,
 } from "@/lib/adminApi";
 
@@ -28,8 +27,6 @@ export default function AdminGhostProxiesPage() {
   const [result, setResult] = useState<GhostProxiesResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [needsKey, setNeedsKey] = useState(false);
-  const [keyDraft, setKeyDraft] = useState("");
 
   const load = useCallback(async (nextResource: Resource) => {
     setBusy(true);
@@ -41,11 +38,9 @@ export default function AdminGhostProxiesPage() {
     });
     setBusy(false);
     if (!response.ok || !response.data) {
-      if (response.status === 401) setNeedsKey(true);
       setError(response.error ?? "Could not load GhostProxies data.");
       return;
     }
-    setNeedsKey(false);
     setResult(response.data);
   }, [country, poolType, state]);
 
@@ -54,11 +49,9 @@ export default function AdminGhostProxiesPage() {
     void adminGhostProxies("stats").then((response) => {
       if (cancelled) return;
       if (!response.ok || !response.data) {
-        if (response.status === 401) setNeedsKey(true);
         setError(response.error ?? "Could not load GhostProxies data.");
         return;
       }
-      setNeedsKey(false);
       setResult(response.data);
     });
     return () => {
@@ -85,37 +78,6 @@ export default function AdminGhostProxiesPage() {
           Configure API key
         </Link>
       </div>
-
-      {needsKey && (
-        <section className={`${panel} mb-5 max-w-xl`}>
-          <h2 className="font-bold">Admin API access</h2>
-          <p className="mt-1 text-sm text-[var(--color-ink-soft)]">
-            Enter the admin key from the server configuration. It stays in this browser tab.
-          </p>
-          <form
-            className="mt-4 flex gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setAdminKey(keyDraft);
-              setNeedsKey(false);
-              void load("stats");
-            }}
-          >
-            <input
-              className={`${input} min-w-0 flex-1`}
-              type="password"
-              autoComplete="off"
-              value={keyDraft}
-              onChange={(event) => setKeyDraft(event.target.value)}
-              placeholder="Admin API key"
-              aria-label="Admin API key"
-            />
-            <button className="rounded-xl bg-[var(--color-brand)] px-4 py-2 text-sm font-bold text-white">
-              Connect
-            </button>
-          </form>
-        </section>
-      )}
 
       <section className={`${panel} mb-5`}>
         <div className="flex flex-wrap items-center gap-2">

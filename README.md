@@ -23,6 +23,9 @@ npm run verify         # typecheck + lint + backend tests + cPanel build
 ```
 
 For a VPS installation using Nginx + PHP-FPM, see [DEPLOY-VPS.md](DEPLOY-VPS.md).
+For deployment setup, upload the release and run `bash installer.sh` from the
+server document root. It configures the initial admin login and private runtime
+storage; see [DEPLOY.md](DEPLOY.md) or [DEPLOY-VPS.md](DEPLOY-VPS.md) for steps.
 
 ---
 
@@ -123,9 +126,10 @@ dist/
 
 Then, on the server:
 
-1. Copy `dist/api/config.sample.php` → `dist/api/config.php` and fill in your
-   Palplus and NOWPayments keys plus `public_base_url`.
-2. `chmod 755 dist/api/data` so PHP can write the order ledger.
+1. Run `bash installer.sh` from the document root. Set the admin email/password,
+   HTTPS URL, environment, external data directory, and PHP-FPM user.
+2. Sign in at `/admin` and add Palplus, NOWPayments, and other provider settings
+   in Configurations.
 3. Point the Palplus channel callback and the NOWPayments IPN at
    `https://<domain>/api/palplus/webhook` and `/api/nowpayments/webhook`.
 4. Visit `/api/config-status` to confirm both gateways report `configured`.
@@ -240,7 +244,7 @@ so storing one is a guaranteed support ticket.
 
 Buyers and admins can test proxies instead of trusting them.
 `POST /api/orders/proxies-check` (token-gated, buyer) and
-`POST /api/admin/proxies/check` (admin key) connect **through** each proxy to
+`POST /api/admin/proxies/check` (admin session) connect **through** each proxy to
 this site's own `/api/proxies/echo`, which reports the exit IP and the forwarding
 headers it saw. From that, each address is graded on:
 
@@ -323,8 +327,9 @@ name automatically.
 
 - The catalog is a **static TypeScript array**; admin product edits are
   session-only and the UI says so.
-- The admin stock console sits behind the `/admin` Google sign-in gate, so it
-  needs both a signed-in admin and the `admin_api_key`.
+- The admin console uses the email/password created by `installer.sh`. Admin
+  APIs validate a server-side session; the optional `admin_api_key` is retained
+  only for legacy server-to-server clients and is never sent by browser code.
 - Wallet and WhatsApp orders are fulfilled by hand.
 - The on-demand provider is a single point of failure for SMS when pre-bought
   stock is empty; keep some static numbers for your best sellers.
@@ -333,15 +338,15 @@ name automatically.
 - Orders live in **one** place: the PHP ledger (`server/api/lib/store.php`),
   written by the checkout endpoints and settled by the webhooks. There is no
   browser-written order store. The admin screens read the ledger through
-  `/api/admin/orders` (admin key), and a buyer reads their own orders through
+  `/api/admin/orders` (admin session), and a buyer reads their own orders through
   their per-order token.
 - The store does not use Firestore at all. Firebase is present only for Google
   sign-in. `deploy/cpanel/firestore.rules` denies every client read and write;
   publish it, and do not add a collection without a rule to match.
 - Wallet balances live in `localStorage` and are deliberately **not**
   self-creditable — a client-side top-up button would let anyone mint money.
-- The admin **pages** are gated client-side on `ADMIN_EMAILS`, which is a
-  convenience, not a control: every admin API call independently requires the
-  admin key. Nothing sensitive is protected by the client-side check alone.
+- Admin credentials are not hardcoded into the application or client bundle.
+  Run `bash installer.sh --reset-admin` on the server to replace the login
+  without changing store settings or customer data.
 - The Palplus `channelId` must be configured in the Palplus console (or set in
   `config.php`), otherwise the API returns `400 NO_DEFAULT_CHANNEL`.

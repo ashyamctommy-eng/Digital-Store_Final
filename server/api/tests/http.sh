@@ -28,6 +28,7 @@ STUB_BASE="http://127.0.0.1:${STUB_PORT}/api/v1"
 DATA_DIR="$(mktemp -d)"
 STUB_STATE="$(mktemp)"
 RESEND_STATE="$(mktemp)"
+ADMIN_COOKIE="$(mktemp)"
 CONFIG_FILE="$API_DIR/config.php"
 CONFIG_BACKUP=""
 SERVER_PID=""
@@ -122,7 +123,7 @@ cleanup() {
   [ -n "$RESEND_PID" ] && kill "$RESEND_PID" 2>/dev/null
   for pid in $STUB_PIDS; do kill "$pid" 2>/dev/null; done
   if [ -n "$CONFIG_BACKUP" ]; then mv "$CONFIG_BACKUP" "$CONFIG_FILE"; else rm -f "$CONFIG_FILE"; fi
-  rm -rf "$DATA_DIR" "$STUB_STATE" "$RESEND_STATE" "$RESEND_STATE.lock"
+  rm -rf "$DATA_DIR" "$STUB_STATE" "$RESEND_STATE" "$RESEND_STATE.lock" "$ADMIN_COOKIE"
 }
 trap cleanup EXIT
 
@@ -161,6 +162,16 @@ return [
     'smsotp' => ['api_key' => 'stub-key', 'api_base' => '$STUB_BASE', 'min_balance' => 0.01, 'balance_cache_seconds' => 0],
 ];
 PHPEOF
+
+"$PHP_BIN" -r '
+  $path = $argv[1] . "/admin-credentials.json";
+  $json = json_encode([
+    "email" => "admin@example.test",
+    "password_hash" => password_hash("Admin-Test-Passphrase-2026!", PASSWORD_DEFAULT),
+  ]);
+  file_put_contents($path, $json, LOCK_EX);
+  chmod($path, 0600);
+' "$DATA_DIR"
 
 SMSOTP_STUB_STATE="$STUB_STATE" "$PHP_BIN" -S "127.0.0.1:${STUB_PORT}" "$API_DIR/tests/smsotp-stub.php" >/tmp/dhs-stub.log 2>&1 &
 STUB_PID=$!
@@ -364,6 +375,44 @@ check "wrong method -> 405" "405" "$CODE"
 
 echo
 echo -e "\033[1mAdmin authentication\033[0m"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' "$BASE/admin/auth/me")
+check "admin session endpoint reports setup -> 200" "200" "$CODE"
+check_contains "admin setup is configured but unauthenticated" '"configured":true,"authenticated":false' "$(cat /tmp/dhs-r.json)"
+check_absent "admin session endpoint never exposes password hashes" 'password_hash' "$(cat /tmp/dhs-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/auth/login" \
+  -H 'Content-Type: application/json' -d '{"email":"admin@example.test","password":"not-the-password"}')
+check "admin login rejects wrong password -> 401" "401" "$CODE"
+check_contains "login failure uses a generic credentials error" '"errorCode":"INVALID_CREDENTIALS"' "$(cat /tmp/dhs-r.json)"
+
+CODE=$(curl -s -D /tmp/dhs-admin-login.headers -o /tmp/dhs-r.json -w '%{http_code}' \
+  -c "$ADMIN_COOKIE" -X POST "$BASE/admin/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.test","password":"Admin-Test-Passphrase-2026!"}')
+check "admin login accepts configured credentials -> 200" "200" "$CODE"
+check_contains "admin login sets a separate admin session cookie" 'dhs_admin=' "$(cat /tmp/dhs-admin-login.headers)"
+check_contains "admin session cookie is HttpOnly and Strict" 'HttpOnly; SameSite=Strict' "$(cat /tmp/dhs-admin-login.headers)"
+check_contains "admin login returns identity only" '"user":{"email":"admin@example.test"}' "$(cat /tmp/dhs-r.json)"
+check_absent "admin login response never exposes password hash" 'password_hash' "$(cat /tmp/dhs-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -b "$ADMIN_COOKIE" "$BASE/admin/smsotp-status")
+check "admin session authorizes admin API without browser key -> 200" "200" "$CODE"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -b "$ADMIN_COOKIE" \
+  -X POST "$BASE/admin/inventory/add" -H 'Content-Type: application/json' \
+  -H 'Origin: https://attacker.example' -d '{"productId":"p1","text":"a|b"}')
+check "admin session mutation rejects a foreign origin -> 403" "403" "$CODE"
+check_contains "foreign-origin mutation has explicit error code" '"errorCode":"ORIGIN_NOT_ALLOWED"' "$(cat /tmp/dhs-r.json)"
+
+CODE=$(curl -s -D /tmp/dhs-admin-logout.headers -o /tmp/dhs-r.json -w '%{http_code}' \
+  -b "$ADMIN_COOKIE" -c "$ADMIN_COOKIE" -X POST "$BASE/admin/auth/logout" \
+  -H 'Content-Type: application/json' -d '{}')
+check "admin logout ends the session -> 200" "200" "$CODE"
+check_contains "admin logout clears the session cookie" 'dhs_admin=deleted' "$(cat /tmp/dhs-admin-logout.headers)"
+
+CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -b "$ADMIN_COOKIE" "$BASE/admin/smsotp-status")
+check "admin API rejects requests after logout -> 401" "401" "$CODE"
 
 CODE=$(curl -s -o /tmp/dhs-r.json -w '%{http_code}' -X POST "$BASE/admin/inventory/add" \
   -H 'Content-Type: application/json' -d '{"productId":"p1","text":"a|b"}')

@@ -1,7 +1,7 @@
 <?php
 /**
- * GET  /api/admin/settings          (admin key required)
- * POST /api/admin/settings          (admin key required)
+ * GET  /api/admin/settings          (admin session or legacy key required)
+ * POST /api/admin/settings          (admin session or legacy key required)
  *
  * The super-admin configuration surface.
  *
@@ -14,9 +14,9 @@
  * rejected if any field fails so a save can never half-apply. Sending an empty
  * string clears a value, which is how you fall back to config.php.
  *
- * `admin_api_key` is deliberately not writable here: it is the credential that
- * authorises this endpoint, and a bad save would lock the owner out of the only
- * tool that could fix it. It stays in config.php.
+ * Admin bootstrap credentials and the legacy `admin_api_key` are deliberately
+ * not writable here. The installer manages the admin login; this endpoint cannot
+ * replace the credential required to access it.
  */
 
 declare(strict_types=1);
@@ -58,7 +58,7 @@ function settings_checklist(array $config): array
                 $dir = (string) config_value($config, 'data_dir', __DIR__ . '/../data');
                 return is_dir($dir) ? is_writable($dir) : is_writable(dirname($dir));
             })(),
-            'detail' => 'chmod 755 api/data and api/data/inventory, or the order ledger cannot be written.',
+            'detail' => 'Ensure the private external data directory is writable by PHP-FPM.',
             'blocking' => true,
         ],
         [
@@ -148,5 +148,5 @@ json_ok([
     'checklist' => settings_checklist($config),
     'mode' => (string) config_value($config, 'mode', 'sandbox'),
     // Stated in the response so the UI never has to guess.
-    'not_editable_here' => ['admin_api_key', 'data_dir'],
+    'not_editable_here' => ['admin_credentials', 'admin_api_key', 'data_dir'],
 ]);

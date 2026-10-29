@@ -1,1 +1,1 @@
-# Order ledger directory. Must be writable by PHP (chmod 755/775) after upload.
+# Development fallback only. installer.sh configures private external runtime storage.

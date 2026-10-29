@@ -19,28 +19,33 @@ The deployable site and API are assembled in `dist/`. Upload the **contents** of
 that directory to the VPS document root, for example `/var/www/digital-hub-shop`.
 Do not upload `node_modules`, `.git`, source maps, or a development `.env` file.
 
-## 2. Keep runtime data private
+## 2. Install private configuration and admin access
 
-The PHP API stores orders, settings and inventory as JSON files. For production,
-place the data directory outside the Nginx document root and set `data_dir` in
-`api/config.php` to that absolute path:
-
-```php
-'data_dir' => '/var/lib/digital-hub-shop',
-```
-
-Create the directory and grant write access to the PHP-FPM user only. For
-example, if PHP-FPM runs as `www-data`:
+The PHP API stores orders, settings, credentials and inventory as JSON files.
+Run the installer from the deployed document root with sudo:
 
 ```bash
-sudo install -d -o www-data -g www-data -m 0750 /var/lib/digital-hub-shop
-sudo install -d -o www-data -g www-data -m 0750 /var/lib/digital-hub-shop/inventory
+cd /var/www/digital-hub-shop
+sudo bash installer.sh
 ```
 
-Copy `api/config.sample.php` to `api/config.php`, then set `admin_api_key`,
-`data_dir`, and the HTTPS `public_base_url`. Keep `config.php` readable only by
-the deployment account and PHP-FPM user; never commit it or put it in a release
-archive.
+Enter the admin email/password, HTTPS site URL, environment, private data path,
+and PHP-FPM user (commonly `www-data`). Use a password of at least 14
+characters. The password is entered without echo and stored only as a hash.
+The installer writes a small `api/config.php` wrapper and stores the admin
+credential file in the private data directory; no provider keys are requested.
+
+The default VPS data path is `/var/lib/digital-hub-shop`, outside the document
+root. To change the admin login without changing any other configuration or
+data:
+
+```bash
+sudo bash installer.sh --reset-admin
+```
+
+The installer assigns the private directory to the configured PHP-FPM user and
+uses restricted permissions. Do not recursively loosen permissions on the
+document root or runtime data.
 
 ## 3. Configure Nginx and PHP-FPM
 
@@ -69,7 +74,7 @@ directory should be the external data directory described above. Confirm:
   `data_dir_writable: true`.
 - `https://DOMAIN/api/data/` and `https://DOMAIN/api/config.php` return 403 or
   404, never file contents.
-- `/admin/` loads and accepts the configured admin key.
+- `/admin/` accepts the email/password configured by `installer.sh`.
 - `npm run test:php` and `npm run verify` passed before upload.
 
 Register the Palplus and NOWPayments callbacks using the exact HTTPS URLs in
@@ -86,9 +91,9 @@ and are not saved until an admin submits the product form.
 ## 5. Backups and updates
 
 Back up `/var/lib/digital-hub-shop` separately from static releases. It contains
-the order ledger, settings, and stock queues. Before replacing files during an
-update, preserve this data directory and `api/config.php`; neither belongs in a
-fresh release bundle.
+the admin password hash, order ledger, settings, and stock queues. Before
+replacing files during an update, preserve this data directory and `api/config.php`;
+neither belongs in a fresh release bundle.
 
 Build a new `dist/` and deploy it as a release directory, then switch the
 Nginx document root or symlink to the new release. Do not delete or overwrite

@@ -6,38 +6,10 @@ import type { Product } from "./products";
 /**
  * Admin API client.
  *
- * The admin endpoints are protected by a shared key held in `config.php` on the
- * server. It is entered once and kept in sessionStorage — never bundled, never
- * in localStorage, and gone when the tab closes.
- *
- * This is a shared secret rather than per-user auth; see server/api/README.md
- * for the Firebase-token upgrade path.
+ * The browser authenticates through the server's HttpOnly admin session cookie.
+ * The optional legacy API key is never read or stored by this client.
  */
-const ADMIN_KEY_STORAGE = "dhs.adminKey";
-
-export function getAdminKey(): string {
-  if (typeof window === "undefined") return "";
-  try {
-    return sessionStorage.getItem(ADMIN_KEY_STORAGE) ?? "";
-  } catch {
-    return "";
-  }
-}
-
-export function setAdminKey(key: string): void {
-  try {
-    if (key) sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
-    else sessionStorage.removeItem(ADMIN_KEY_STORAGE);
-  } catch {
-    // Session storage unavailable — the caller still gets an error from the API.
-  }
-}
-
-export function clearAdminKey(): void {
-  setAdminKey("");
-}
-
-interface ApiResult<T> {
+export interface ApiResult<T> {
   ok: boolean;
   data?: T;
   error?: string;
@@ -46,23 +18,31 @@ interface ApiResult<T> {
   fields?: Record<string, string>;
 }
 
+export interface AdminSessionResponse {
+  configured: boolean;
+  authenticated: boolean;
+  user: { email: string } | null;
+}
+
 async function adminFetch<T>(
   path: string,
   init: RequestInit = {}
 ): Promise<ApiResult<T>> {
-  const key = getAdminKey();
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       ...init,
       cache: "no-store",
+      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
-        "x-admin-key": key,
         ...(init.headers ?? {}),
       },
     });
     const json = await res.json().catch(() => null);
     if (!res.ok) {
+      if (res.status === 401 && typeof window !== "undefined") {
+        window.dispatchEvent(new Event("admin-session-expired"));
+      }
       return {
         ok: false,
         status: res.status,
@@ -75,6 +55,24 @@ async function adminFetch<T>(
   } catch {
     return { ok: false, error: "Could not reach the payment API." };
   }
+}
+
+export function adminAuthMe(): Promise<ApiResult<AdminSessionResponse>> {
+  return adminFetch("/admin/auth/me", { method: "GET" });
+}
+
+export function adminLogin(
+  email: string,
+  password: string
+): Promise<ApiResult<AdminSessionResponse>> {
+  return adminFetch("/admin/auth/login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export function adminLogout(): Promise<ApiResult<{ authenticated: false }>> {
+  return adminFetch("/admin/auth/logout", { method: "POST", body: "{}" });
 }
 
 /* ------------------------------- inventory ------------------------------ */
@@ -293,7 +291,7 @@ export function adminGhostProxies(
 
 /* ------------------------------ proxy checker ---------------------------- */
 
-/** Grade and rank proxies before they are sold. Admin key required. */
+/** Grade and rank proxies before they are sold. Admin session required. */
 export function adminCheckProxies(
   input: { text: string } | { productId: string; status?: string }
 ): Promise<ApiResult<import("./payments").ProxyCheckResponse>> {

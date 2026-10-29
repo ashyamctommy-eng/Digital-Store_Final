@@ -24,15 +24,18 @@ into client JavaScript.
 | POST | `/api/auth/verify` | Verify a single-use email token and start a session |
 | POST | `/api/auth/verification-resend` | Request another verification message |
 | GET | `/api/orders/account` | Link and list orders addressed to the verified account email |
-| GET | `/api/admin/smsotp-status` | Provider balance + service list (admin key) |
-| GET | `/api/admin/settings` | Configurable settings + setup checklist (admin key) |
-| POST | `/api/admin/settings` | Save allow-listed settings (admin key) |
-| POST | `/api/admin/settings/test` | Check a credential against the live provider (admin key) |
-| POST | `/api/admin/ai/product-description` | Generate an editable product-description draft using Novita (admin key) |
-| POST | `/api/admin/proxies/check` | Test/rank pasted addresses (admin key) |
-| POST | `/api/admin/inventory/add` | Bulk credential upload (admin key) |
-| GET | `/api/admin/inventory/list` | Per-product stock totals (admin key) |
-| POST | `/api/admin/inventory/delete` | Remove one unit (admin key) |
+| GET | `/api/admin/auth/me` | Admin session state and bootstrap status |
+| POST | `/api/admin/auth/login` | Create the administrator session |
+| POST | `/api/admin/auth/logout` | End the administrator session |
+| GET | `/api/admin/smsotp-status` | Provider balance + service list (admin session or legacy key) |
+| GET | `/api/admin/settings` | Configurable settings + setup checklist (admin session or legacy key) |
+| POST | `/api/admin/settings` | Save allow-listed settings (admin session or legacy key) |
+| POST | `/api/admin/settings/test` | Check a credential against the live provider (admin session or legacy key) |
+| POST | `/api/admin/ai/product-description` | Generate an editable product-description draft using Novita (admin session or legacy key) |
+| POST | `/api/admin/proxies/check` | Test/rank pasted addresses (admin session or legacy key) |
+| POST | `/api/admin/inventory/add` | Bulk credential upload (admin session or legacy key) |
+| GET | `/api/admin/inventory/list` | Per-product stock totals (admin session or legacy key) |
+| POST | `/api/admin/inventory/delete` | Remove one unit (admin session or legacy key) |
 
 `api/.htaccess` rewrites the extensionless paths onto the `.php` files and
 hard-blocks `lib/`, `data/` and `config.php` from HTTP.
@@ -50,7 +53,7 @@ Configure `resend.api_key`, a verified `resend.from` address and the public
 HTTPS site URL before enabling email signup. Firebase Google sign-in remains
 available, and old Firebase email/password accounts may still sign in through
 the existing-provider fallback. New local accounts are not admin accounts,
-even if their email matches the browser's admin allow-list.
+even if their email matches the administrator email.
 
 After verification, `/api/orders/account` links ledger orders whose normalized
 `buyer_email` exactly matches the verified account address. It returns safe
@@ -65,13 +68,38 @@ server, or in Super Admin → Configurations. The AI endpoint is admin-protected
 limited to 20 drafts per hour per installation, uses only the product facts
 provided, and never saves a catalog change automatically.
 
+## Admin authentication
+
+Run `bash installer.sh` from the deployed document root to create the initial
+administrator and server configuration. The installer asks for an admin email
+and password (14+ characters), HTTPS URL, environment, external private data
+directory, and PHP-FPM user. It writes only a password hash to
+`admin-credentials.json` inside the private data directory. The browser receives
+an HttpOnly, SameSite=Strict admin session cookie; it never stores the admin
+password or API key.
+
+Use `bash installer.sh --reset-admin` to change the email/password later. This
+updates only the admin credential file and preserves the store configuration,
+orders, inventory, and settings. Provider API keys should be entered after login
+under Admin → Configurations, not passed to the installer.
+
+The API continues to accept `x-admin-key` only as an optional legacy
+server-to-server credential. Do not use it in browser code. Session-authenticated
+mutations require same-origin JSON requests. Login failures are rate-limited,
+and sessions expire after 30 minutes idle or 8 hours total.
+
 ## Setup
 
 ```bash
-cp config.sample.php config.php     # then add your live keys
-mkdir -p data && chmod 755 data     # PHP must be able to write the ledger
+cd /path/to/deployed-document-root
+bash installer.sh
 ```
 
+- Install PHP 8.2+ with `curl`, `json`, and `hash`; run the installer as root or
+  as the PHP-FPM account that will write the runtime files.
+- Keep `api/config.php` out of Git and release archives. The installer creates
+  it on the server and puts data, sessions, and the admin hash outside the web
+  root with restrictive permissions.
 - `public_base_url` **must** be the site's public HTTPS URL — Palplus rejects
   `localhost` and private addresses, and it is where the callback URL points.
 - `palplus.channel_id` is optional but usually required: without a default
@@ -93,7 +121,7 @@ api/
   palplus/{initiate,webhook}.php
   nowpayments/{create-invoice,webhook}.php
   orders/status.php
-  data/                  order ledger (JSON) + events.log — blocked from HTTP
+  <private data_dir>/    admin hash, order ledger, settings and inventory — outside web root
 ```
 
 ## Order ledger
@@ -156,9 +184,9 @@ gateway client had to change to pick these up. Clearing a value in the console
 falls back to `config.php` — that is the supported way to revert without editing
 files on the server.
 
-Two keys are not in the schema at all: `admin_api_key` (it authorises the
-console) and `data_dir` (moving it would move the file being read). Neither can
-be written through the API, by design.
+Bootstrap administrator credentials, the optional legacy `admin_api_key`, and
+`data_dir` are not in the schema. The installer manages the admin login, and
+the data path stays fixed so settings cannot move the files they are reading.
 
 Writes are all-or-nothing: one invalid field rejects the batch, so a save cannot
 half-apply.
@@ -177,7 +205,7 @@ private, loopback, link-local, carrier-NAT and documentation ranges at ingest.
 ## Proxy checker
 
 `POST /api/orders/proxies-check` (buyer, token-gated) and
-`POST /api/admin/proxies/check` (admin key) grade addresses by connecting
+`POST /api/admin/proxies/check` (admin session) grade addresses by connecting
 through them to `/api/proxies/echo` on this same host, which reports the exit IP
 and forwarding headers. Results are ranked by a 0-100 heuristic covering health,
 speed, anonymity and detected protocol. Uses `curl_multi`, a bounded concurrency

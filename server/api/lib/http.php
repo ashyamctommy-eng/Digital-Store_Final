@@ -39,7 +39,7 @@ function load_config(): array
     $path = __DIR__ . '/../config.php';
     if (!is_file($path)) {
         json_error(
-            'Payment configuration is missing. Copy server/api/config.sample.php to config.php and add your API keys.',
+            'Server configuration is missing. Run installer.sh from the deployed document root.',
             500,
             'CONFIG_MISSING'
         );
@@ -234,19 +234,31 @@ function json_response_then(array $payload, callable $after, int $status = 200):
  */
 function require_admin(array $config): void
 {
+    require_once __DIR__ . '/admin-auth.php';
+
     $expected = trim((string) config_value($config, 'admin_api_key', ''));
-    if ($expected === '') {
+    $provided = (string) ($_SERVER['HTTP_X_ADMIN_KEY'] ?? '');
+    if ($expected !== '' && $provided !== '' && hash_equals($expected, $provided)) {
+        return;
+    }
+
+    if (admin_auth_current_user($config) !== null) {
+        $method = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+        if (!in_array($method, ['GET', 'HEAD', 'OPTIONS'], true)) {
+            customer_auth_require_same_origin_json();
+        }
+        return;
+    }
+
+    if ($expected === '' && !admin_auth_is_configured($config)) {
         json_error(
-            'Admin API key is not configured. Set admin_api_key in server/api/config.php.',
+            'Admin login is not configured. Run installer.sh on the server.',
             503,
             'ADMIN_NOT_CONFIGURED'
         );
     }
 
-    $provided = (string) ($_SERVER['HTTP_X_ADMIN_KEY'] ?? '');
-    if ($provided === '' || !hash_equals($expected, $provided)) {
-        json_error('Invalid or missing admin key.', 401, 'UNAUTHORIZED');
-    }
+    json_error('Invalid or missing admin authentication.', 401, 'UNAUTHORIZED');
 }
 
 /**

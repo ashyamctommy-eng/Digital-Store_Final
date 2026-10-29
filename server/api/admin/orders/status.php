@@ -1,6 +1,6 @@
 <?php
 /**
- * POST /api/admin/orders/status      (admin key required)
+ * POST /api/admin/orders/status      (admin session or legacy key required)
  *
  * Manual status override for an order — the escape hatch for a payment settled
  * outside the gateways, or a refund handled by hand.

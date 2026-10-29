@@ -1,6 +1,6 @@
 <?php
 /**
- * POST /api/admin/inventory/delete      (admin key required)
+ * POST /api/admin/inventory/delete      (admin session or legacy key required)
  *
  * Removes a single unit from the queue by its internal id — used to pull a
  * dead credential before it can be sold.

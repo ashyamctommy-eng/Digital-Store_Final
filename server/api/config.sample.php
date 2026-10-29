@@ -4,8 +4,7 @@
  *
  * THIS FILE MUST NOT BE COMMITTED WITH REAL KEYS.
  *
- * Copy it to `config.php` on the server and fill in the live values:
- *     cp config.sample.php config.php
+ * Run `bash installer.sh` from the document root to create the server config.
  *
  * `config.php` is git-ignored and blocked from HTTP access by .htaccess.
  */
@@ -15,13 +14,13 @@
  *
  * Most settings — every gateway key, email, provider limits — are managed in the
  * super-admin console under **Configurations**, and stored in
- * `api/data/settings.json`. Values saved there take precedence over this file,
+ * `<data_dir>/settings.json`. Values saved there take precedence over this file,
  * so you only need to edit this file by hand for the two things the console
  * deliberately will not touch:
  *
- *   admin_api_key   the credential that authorises the console. Making it
- *                   editable from inside the console would mean a bad save locks
- *                   you out of the only tool that could fix it.
+ *   admin-credentials.json  installer-created console account; the password is
+ *                   stored only as a one-way hash in the private data directory.
+ *   admin_api_key   optional legacy credential for trusted server-side scripts.
  *   data_dir        where the ledger and settings live. Moving it from the
  *                   console would move the file the console is reading.
  *
@@ -154,10 +153,9 @@ return [
     ],
 
     // ---------------------------------------------------------------
-    // Admin API
-    // Shared secret for the admin-only inventory endpoints. Generate one with:
-    //   php -r "echo bin2hex(random_bytes(24));"
-    // Enter it once in the admin UI; it is stored per browser session.
+    // Optional legacy admin API credential for trusted server-side scripts.
+    // The browser console uses the installer's email/password account and an
+    // HttpOnly session instead of storing this key in the browser.
     // ---------------------------------------------------------------
     'admin_api_key' => '',
 

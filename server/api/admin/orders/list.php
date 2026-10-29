@@ -1,6 +1,6 @@
 <?php
 /**
- * GET /api/admin/orders/list      (admin key required)
+ * GET /api/admin/orders/list      (admin session or legacy key required)
  *
  * The real order ledger, newest first. This is the same file store the payment
  * webhooks write to and fulfilment dispatches from — not a copy the browser

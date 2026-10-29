@@ -39,17 +39,6 @@ export const DELIVERY = {
 } as const;
 
 /**
- * Accounts allowed into /admin.
- *
- * This gate only controls the browser admin pages. Admin API endpoints enforce
- * the server-side admin_api_key independently.
- */
-export const ADMIN_EMAILS: string[] = [
-  "wildpharmtech9@gmail.com",
-  "ashyamctommy@gmail.com",
-];
-
-/**
  * Announcement cards for the notice slider. `tone` maps to a palette in
  * the NoticeSlider component.
  */

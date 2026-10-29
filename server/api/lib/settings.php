@@ -14,11 +14,10 @@
  *      to rewrite configuration it has no business touching.
  *   2. Secrets are never returned. The console receives a masked hint, whether
  *      a value is set, and where it came from — never the value itself.
- *   3. `admin_api_key` and `data_dir` are deliberately NOT in the schema. The
- *      admin key is the credential that authorises this console, so making it
- *      editable from inside the console would mean a bad save locks the owner
- *      out of the only tool that can fix it. It stays in `config.php`, which is
- *      always recoverable by hand.
+ *   3. Admin credentials, the optional legacy `admin_api_key`, and `data_dir`
+ *      are deliberately NOT in the schema. The installer owns the bootstrap
+ *      login; keeping it outside the settings editor prevents lockouts. The
+ *      data directory also stays fixed so the console cannot move its own files.
  *
  * Resolution order for every writable key is: settings.json, then config.php,
  * then the built-in default. `config_value()` applies that everywhere, so no

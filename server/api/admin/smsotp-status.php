@@ -1,6 +1,6 @@
 <?php
 /**
- * GET /api/admin/smsotp-status      (admin key required)
+ * GET /api/admin/smsotp-status      (admin session or legacy key required)
  *
  * Reports the on-demand SMS provider's state so the admin console can show
  * whether the dynamic fallback is actually usable, and lets the admin verify

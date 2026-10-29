@@ -1,6 +1,6 @@
 <?php
 /**
- * GET /api/admin/inventory/list      (admin key required)
+ * GET /api/admin/inventory/list      (admin session or legacy key required)
  *
  * Per-product stock totals plus a small sample of available units, for the
  * admin stock screen.
