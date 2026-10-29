@@ -5,6 +5,7 @@
 - Source: `digital-store-source` — Next.js storefront with a PHP JSON API.
 - GitHub target: https://github.com/ashyamctommy-eng/Digital-Store_Final, branch `main`.
 - The workspace's configured Git remote is the internal `gitsafe-backup`; do not push project changes to it. Use the connected GitHub integration for the target repository.
+- The verified signup and account-owned order changes were pushed to GitHub `main` in commit `b300c0807cbe9ac18a5d115978a56f7dfe445c77`.
 - The owner plans a fresh VPS deployment on an already-owned domain. Deployment has not happened yet.
 
 ## Completed
@@ -37,13 +38,13 @@
   - HTTP tests: 196 passed.
 - A live Novita API request using the configured runtime secrets returned valid JSON in the same format used by the draft endpoint. No secrets were printed or saved.
 - PHP lint, HTTP test shell syntax, and `git diff --check` pass.
-- Frontend typecheck and lint remain unverified because Next.js, React, Firebase, and ESLint dependencies are absent from the workspace install; the typecheck produces cascading missing-module errors. A previous dependency install was blocked by a security rejection.
+- The 12 changed TypeScript/TSX files pass a syntax-only parse. Full frontend typecheck and lint remain unverified because Next.js, React, Firebase, and ESLint dependencies are absent from the workspace install; the typecheck produces cascading missing-module errors. A previous dependency install was blocked by a security rejection.
 
 ## Security and Deployment
 
 - A GhostProxies API key was shared in chat. Treat it as exposed: revoke and rotate it, do not repeat it or commit it, and enter the replacement through the server-side admin setting after deployment.
 - `NOVITA_API_KEY` and `NOVITA_MODEL` are Replit secrets and are consumed server-side. Never print or commit their values. They do not transfer automatically to the VPS; configure them there through the admin settings or PHP runtime environment.
-- Before pushing, include only project content from this directory; exclude secrets, dependency folders, caches, and build outputs.
+- The requested project changes were pushed to the target GitHub repository; keep secrets, dependency folders, caches, and build outputs out of future commits.
 
 ## Infrastructure Priorities
 
@@ -54,7 +55,7 @@
 
 ## Next Actions
 
-1. Confirm the latest project delta is present on the target GitHub repository's `main` branch before deploying to the VPS.
+1. Deploy the latest GitHub `main` branch to the fresh VPS using `DEPLOY-VPS.md`; no VPS deployment has happened yet.
 2. Configure and verify Resend on the VPS, then test signup, email verification and account-owned order retrieval on the public domain.
 3. Confirm GhostProxies' generate response and quota/idempotency behavior using a sanitized response before enabling proxy fulfillment or a customer proxy dashboard.
 4. Add automated offsite backups and a restore check before the VPS begins holding live orders.
