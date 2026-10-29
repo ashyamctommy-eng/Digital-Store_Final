@@ -11,16 +11,13 @@ import type { OrderStatus } from "./payments";
  * per-order token needed to read the credentials — and the Order History page
  * reads it back.
  *
- * This is the authoritative list for a guest buyer. Firestore still mirrors
- * orders in the buyer's own browser. Each record carries the order's retrieval
- * token, which is the only way to read the credentials back — so this store is
- * what makes Order History work without an account. There is no server-side copy
- * of a buyer's list: the ledger holds every order, but only its token-holder (or
- * an admin) can read a given one.
+ * Guest checkouts keep their retrieval token locally. Verified local accounts
+ * can also receive token-free order summaries from the server; those records
+ * are marked accountOwned and use the authenticated PHP session for retrieval.
  */
 export interface LocalOrder {
   orderId: string;
-  /** Per-order secret; required to fetch the credentials. */
+  /** Per-order secret for guest orders; account-owned records may omit it. */
   token: string;
   createdAt: string;
   status: OrderStatus;
@@ -34,6 +31,7 @@ export interface LocalOrder {
   /** Known only after a credentials fetch. */
   credentialCount?: number;
   shortfall?: Record<string, number>;
+  accountOwned?: boolean;
 }
 
 export const ORDERS_KEY = "dhs.orders.v1";

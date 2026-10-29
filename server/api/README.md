@@ -21,6 +21,9 @@ into client JavaScript.
 | POST | `/api/auth/login` | Sign in to a first-party customer account |
 | GET | `/api/auth/me` | Read the current first-party customer session |
 | POST | `/api/auth/logout` | End the current first-party customer session |
+| POST | `/api/auth/verify` | Verify a single-use email token and start a session |
+| POST | `/api/auth/verification-resend` | Request another verification message |
+| GET | `/api/orders/account` | Link and list orders addressed to the verified account email |
 | GET | `/api/admin/smsotp-status` | Provider balance + service list (admin key) |
 | GET | `/api/admin/settings` | Configurable settings + setup checklist (admin key) |
 | POST | `/api/admin/settings` | Save allow-listed settings (admin key) |
@@ -34,18 +37,28 @@ into client JavaScript.
 `api/.htaccess` rewrites the extensionless paths onto the `.php` files and
 hard-blocks `lib/`, `data/` and `config.php` from HTTP.
 
-Email/password signup and login are handled by the PHP API, not Firebase. Password
-hashes and PHP session files stay in the private `data_dir`; the session cookie
-is HttpOnly, SameSite=Lax, and Secure on HTTPS. Signup requires a 12-character
-password, and the API rate-limits signup/login attempts. Firebase Google sign-in
-remains available, and old Firebase email/password accounts may still sign in
-through the existing-provider fallback. New local accounts are not admin
-accounts, even if their email matches the browser's admin allow-list.
+Email/password signup and login are handled by the PHP API, independently of
+Firebase. Signup sends a 24-hour, single-use Resend verification link. The token
+is stored only as a hash and placed in the URL fragment, then submitted to the
+API in a same-origin POST. The customer cannot sign in or claim orders until the
+email is verified. Password hashes, account records, ownership indexes and PHP
+session files stay in the private `data_dir`; the session cookie is HttpOnly,
+SameSite=Lax, and Secure on HTTPS. Signup requires a 12-character password, and
+the API rate-limits signup, login and verification resend attempts.
 
-Email ownership is not verified yet, and local accounts are not linked to the
-per-order retrieval tokens. Do not use an account email alone to expose orders
-or proxy credentials until email verification and server-side order ownership
-binding are added.
+Configure `resend.api_key`, a verified `resend.from` address and the public
+HTTPS site URL before enabling email signup. Firebase Google sign-in remains
+available, and old Firebase email/password accounts may still sign in through
+the existing-provider fallback. New local accounts are not admin accounts,
+even if their email matches the browser's admin allow-list.
+
+After verification, `/api/orders/account` links ledger orders whose normalized
+`buyer_email` exactly matches the verified account address. It returns safe
+order summaries only; credentials remain in the order ledger and are returned
+only through the original order token or a verified account's private order
+ownership index. Orders are never linked by an unverified email. Google/Firebase
+sessions are not PHP account sessions and do not receive this cross-device
+order access.
 
 Novita credentials are configured as `NOVITA_API_KEY` and `NOVITA_MODEL` on the
 server, or in Super Admin → Configurations. The AI endpoint is admin-protected,
@@ -193,8 +206,9 @@ npm run test:php:concurrency  # 10 processes racing for 40 units
 npm run test:php:http         # end-to-end HTTP assertions
 ```
 
-`test:php:http` also starts `tests/smsotp-stub.php`, a stub of the SMS provider
-that records how many times it was charged — so "static stock is preferred" and
+`test:php:http` also starts local Resend and SMS-provider stubs. The Resend stub
+captures verification emails without contacting an external service; the SMS
+stub records how many times it was charged, so "static stock is preferred" and
 "no number is bought on an empty balance" are asserted, not assumed. Proxy
 checking is exercised against a real forwarding proxy started on localhost, so
 the health, anonymity and protocol detection paths are tested for real.
@@ -205,7 +219,7 @@ at a throwaway data directory, and restores any existing one afterwards.
 
 ## Verified
 
-- 110 unit assertions, 61 HTTP assertions, a require-chain check and a
+- 303 unit assertions, 196 HTTP assertions, a require-chain check and a
   10-process concurrency test all pass against PHP 8.4.
 - `tests/requires.php` exists because the same bug shipped twice: a library
   calling a helper from a module it did not require, failing only at runtime on

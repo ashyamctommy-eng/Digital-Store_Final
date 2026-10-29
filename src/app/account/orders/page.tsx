@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { useOrders, type LocalOrder } from "@/lib/orderStore";
-import { fetchCredentials } from "@/lib/payments";
+import { fetchAccountOrders, fetchCredentials } from "@/lib/payments";
 import { downloadOrderText } from "@/lib/orderText";
 import OrderDetailsModal from "@/components/OrderDetailsModal";
 import Icon from "@/components/ui/Icon";
@@ -38,6 +38,56 @@ const [query, setQuery] = useState("");
   const [openOrder, setOpenOrder] = useState<LocalOrder | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [accountOrders, setAccountOrders] = useState<LocalOrder[]>([]);
+  const [accountOrdersLoading, setAccountOrdersLoading] = useState(false);
+  const [accountOrdersError, setAccountOrdersError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    if (user?.authProvider !== "password" || !user.emailVerified) {
+      setAccountOrders([]);
+      setAccountOrdersLoading(false);
+      setAccountOrdersError("");
+      return;
+    }
+
+    setAccountOrdersLoading(true);
+    setAccountOrdersError("");
+    void fetchAccountOrders()
+      .then((result) => {
+        if (!active) return;
+        if (!result.ok || !result.data || !Array.isArray(result.data.orders)) {
+          setAccountOrdersError(result.error ?? "Could not load your linked orders.");
+          return;
+        }
+        setAccountOrders(
+          result.data.orders.map((order) => ({
+            orderId: order.order_id,
+            token: "",
+            accountOwned: true,
+            createdAt: order.created_at,
+            status: order.status,
+            paymentMethod: order.gateway || "Payment",
+            currency: order.currency || "USD",
+            amount: Number(order.amount ?? 0),
+            amountUsd: order.currency === "USD" ? Number(order.amount ?? 0) : 0,
+            buyerEmail: user.email ?? "",
+            items: order.items.map((item) => ({
+              product_id: item.product_id,
+              name: item.name,
+              quantity: item.quantity,
+            })),
+            shortfall: order.shortfall,
+          })),
+        );
+      })
+      .finally(() => {
+        if (active) setAccountOrdersLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user?.authProvider, user?.email, user?.emailVerified, user?.uid]);
 
   /*
    * There used to be a Firestore copy of a signed-in customer's orders here, so
@@ -50,14 +100,21 @@ const [query, setQuery] = useState("");
    * details modal uses.
    */
 
-  const allOrders = useMemo(
-    () =>
-      [...localOrders].sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      ),
-    [localOrders]
-  );
+  const allOrders = useMemo(() => {
+    const linked = new Map(accountOrders.map((order) => [order.orderId, order]));
+    for (const order of localOrders) {
+      const linkedOrder = linked.get(order.orderId);
+      linked.set(order.orderId, {
+        ...linkedOrder,
+        ...order,
+        accountOwned: Boolean(linkedOrder?.accountOwned),
+      });
+    }
+    return [...linked.values()].sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }, [localOrders, accountOrders]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -86,11 +143,16 @@ const [query, setQuery] = useState("");
     });
   }, [allOrders, query, dateFilter]);
 
-  const allSelected = filtered.length > 0 && filtered.every((o) => selected.has(o.orderId));
+  const selectableFiltered = filtered.filter((order) => !order.accountOwned);
+  const allSelected =
+    selectableFiltered.length > 0 &&
+    selectableFiltered.every((o) => selected.has(o.orderId));
   const someSelected = selected.size > 0;
 
   const toggleAll = () => {
-    setSelected(allSelected ? new Set() : new Set(filtered.map((o) => o.orderId)));
+    setSelected(
+      allSelected ? new Set() : new Set(selectableFiltered.map((o) => o.orderId)),
+    );
   };
 
   const toggleOne = (orderId: string) => {
@@ -118,8 +180,8 @@ const [query, setQuery] = useState("");
     setNotice("");
     try {
       let creds: Awaited<ReturnType<typeof fetchCredentials>>["data"] = undefined;
-      if (order.token) {
-        const res = await fetchCredentials(order.orderId, order.token);
+      if (order.token || order.accountOwned) {
+        const res = await fetchCredentials(order.orderId, order.token || undefined);
         creds = res.data;
       }
       downloadOrderText(order, creds?.credentials ?? []);
@@ -166,8 +228,7 @@ const [query, setQuery] = useState("");
         </div>
         <p className="text-sm text-[var(--color-ink-soft)] mt-1">
           {allOrders.length} {allOrders.length === 1 ? "order" : "orders"} on this
-          device
-          {user ? " and in your account" : ""}
+          device or linked to this account
         </p>
 
         {!user && (
@@ -181,6 +242,17 @@ const [query, setQuery] = useState("");
               Sign in
             </Link>{" "}
             to keep your orders across devices.
+          </p>
+        )}
+
+        {accountOrdersLoading && (
+          <p className="mt-3 text-xs text-[var(--color-ink-faint)] animate-pulse">
+            Loading orders linked to your verified account…
+          </p>
+        )}
+        {accountOrdersError && (
+          <p className="mt-3 text-xs text-[var(--color-danger)] bg-[var(--color-danger)]/10 rounded-xl p-3">
+            {accountOrdersError}
           </p>
         )}
 
@@ -271,6 +343,7 @@ const [query, setQuery] = useState("");
                         type="checkbox"
                         checked={allSelected}
                         onChange={toggleAll}
+                        disabled={selectableFiltered.length === 0}
                         aria-label="Select all orders"
                         className="w-4 h-4 rounded border-[var(--color-line)] accent-[var(--color-brand)]"
                       />
@@ -293,13 +366,15 @@ const [query, setQuery] = useState("");
                         className="border-t border-[var(--color-line)] hover:bg-[var(--color-page)] transition-colors"
                       >
                         <td className="px-3 py-3">
-                          <input
-                            type="checkbox"
-                            checked={selected.has(order.orderId)}
-                            onChange={() => toggleOne(order.orderId)}
-                            aria-label={`Select order ${order.orderId}`}
-                            className="w-4 h-4 rounded border-[var(--color-line)] accent-[var(--color-brand)]"
-                          />
+                          {!order.accountOwned && (
+                            <input
+                              type="checkbox"
+                              checked={selected.has(order.orderId)}
+                              onChange={() => toggleOne(order.orderId)}
+                              aria-label={`Select order ${order.orderId}`}
+                              className="w-4 h-4 rounded border-[var(--color-line)] accent-[var(--color-brand)]"
+                            />
+                          )}
                         </td>
 
                         <td className="px-3 py-3">
@@ -330,15 +405,17 @@ const [query, setQuery] = useState("");
                                 <Icon name="download" className="w-4 h-4" />
                               )}
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => remove([order.orderId])}
-                              aria-label={`Delete order ${order.orderId}`}
-                              title="Delete order"
-                              className="p-1.5 rounded-lg text-[var(--color-ink-soft)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 transition-colors"
-                            >
-                              <Icon name="trash" className="w-4 h-4" />
-                            </button>
+                            {!order.accountOwned && (
+                              <button
+                                type="button"
+                                onClick={() => remove([order.orderId])}
+                                aria-label={`Delete order ${order.orderId}`}
+                                title="Delete order"
+                                className="p-1.5 rounded-lg text-[var(--color-ink-soft)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 transition-colors"
+                              >
+                                <Icon name="trash" className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
 

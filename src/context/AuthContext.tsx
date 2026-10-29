@@ -20,6 +20,7 @@ import {
   createLocalAccount,
   getLocalAccount,
   LocalAuthError,
+  verifyLocalAccount,
   signInLocalAccount,
   signOutLocalAccount,
   type LocalAccount,
@@ -31,6 +32,7 @@ export interface AuthUser {
   displayName: string | null;
   photoURL: string | null;
   authProvider: "firebase" | "password";
+  emailVerified: boolean;
 }
 
 interface AuthContextType {
@@ -39,6 +41,7 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (name: string, email: string, password: string) => Promise<void>;
+  verifyEmail: (token: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -51,6 +54,7 @@ function fromFirebase(user: FirebaseUser): AuthUser {
     displayName: user.displayName,
     photoURL: user.photoURL,
     authProvider: "firebase",
+    emailVerified: user.emailVerified,
   };
 }
 
@@ -61,6 +65,7 @@ function fromLocalAccount(account: LocalAccount): AuthUser {
     displayName: account.name,
     photoURL: null,
     authProvider: "password",
+    emailVerified: account.emailVerified,
   };
 }
 
@@ -101,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
+      await signOutLocalAccount().catch(() => undefined);
       setLocalUser(null);
       // Redirect to home is handled by the sign-in page
     } catch (error: unknown) {
@@ -133,12 +139,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Existing Firebase email/password accounts remain usable. Newly created
     // email accounts use the local API, so Firebase can be unavailable.
     const credential = await signInWithEmailAndPassword(auth, email, password);
+    await signOutLocalAccount().catch(() => undefined);
     setFirebaseUser(fromFirebase(credential.user));
     setLocalUser(null);
   };
 
   const signUpWithEmail = async (name: string, email: string, password: string) => {
-    const account = await createLocalAccount(name, email, password);
+    await createLocalAccount(name, email, password);
+  };
+
+  const verifyEmail = async (token: string) => {
+    const account = await verifyLocalAccount(token);
     if (auth.currentUser) {
       await firebaseSignOut(auth).catch(() => undefined);
     }
@@ -167,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut }}
+      value={{ user, loading, signInWithGoogle, signInWithEmail, signUpWithEmail, verifyEmail, signOut }}
     >
       {children}
     </AuthContext.Provider>

@@ -39,8 +39,9 @@ export default function OrderDetailsModal({
   // Whether we can fetch at all is known up front, so it is derived rather
   // than pushed into state from an effect.
   const hasToken = Boolean(order.token);
+  const hasAccountAccess = hasToken || Boolean(order.accountOwned);
   const [credentials, setCredentials] = useState<DeliveredCredential[] | null>(null);
-  const [loading, setLoading] = useState(hasToken);
+  const [loading, setLoading] = useState(hasAccountAccess);
   const [note, setNote] = useState("");
   const [copiedAll, setCopiedAll] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -52,10 +53,10 @@ export default function OrderDetailsModal({
   }, [onClose]);
 
   useEffect(() => {
-    if (!hasToken) return;
+    if (!hasAccountAccess) return;
     let cancelled = false;
 
-    fetchCredentials(order.orderId, order.token)
+    fetchCredentials(order.orderId, order.token || undefined)
       .then((res) => {
         if (cancelled) return;
         if (res.ok && res.data) {
@@ -81,7 +82,7 @@ export default function OrderDetailsModal({
     return () => {
       cancelled = true;
     };
-  }, [order.orderId, order.token, hasToken]);
+  }, [order.orderId, order.token, hasAccountAccess]);
 
   const smsNumbers = (credentials ?? []).filter((c) => c.kind === "sms");
   const proxyUnits = (credentials ?? []).filter((c) => c.kind === "proxy");
@@ -273,6 +274,7 @@ export default function OrderDetailsModal({
                         cred={cred}
                         orderId={order.orderId}
                         token={order.token}
+                        accountOwned={order.accountOwned}
                       />
                     ))}
                   </ul>
@@ -297,6 +299,7 @@ export default function OrderDetailsModal({
                         cred={cred}
                         orderId={order.orderId}
                         token={order.token}
+                        accountOwned={order.accountOwned}
                       />
                     ))}
                   </ul>
@@ -333,7 +336,7 @@ export default function OrderDetailsModal({
               </div>
               <p className="text-sm font-bold">Credentials not available yet</p>
               <p className="text-xs text-[var(--color-ink-soft)] mt-1 max-w-sm mx-auto leading-relaxed">
-                {!hasToken
+                {!hasAccountAccess
                   ? "No retrieval token is stored for this order on this device. Contact support with your order reference and we will re-send your credentials."
                   : note || "They will appear here as soon as the order is fulfilled."}
               </p>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { errorCode } from "@/lib/orders";
+import { resendLocalVerification } from "@/lib/localAuth";
 
 export default function SignInPage() {
   const { user, signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
@@ -14,6 +15,8 @@ export default function SignInPage() {
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [canResend, setCanResend] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Redirect to home if already signed in
@@ -26,17 +29,22 @@ export default function SignInPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setNotice("");
+    setCanResend(false);
     setLoading(true);
 
     try {
       if (isSignUp) {
         await signUpWithEmail(name, email, password);
+        setNotice("If this account needs email verification, a link has been sent. Check your inbox, or sign in if you already verified.");
+        setCanResend(true);
       } else {
         await signInWithEmail(email, password);
+        router.push("/");
       }
-      router.push("/");
     } catch (err: unknown) {
       const code = errorCode(err);
+      setCanResend(code === "EMAIL_NOT_VERIFIED" || code === "EMAIL_SEND_FAILED");
       const msg = code === "auth/email-already-in-use"
         ? "Email already registered. Try signing in."
         : code === "auth/wrong-password" ||
@@ -49,6 +57,10 @@ export default function SignInPage() {
         ? "Please enter a valid email address."
         : code === "EMAIL_ALREADY_REGISTERED"
         ? "Email already registered. Try signing in."
+        : code === "EMAIL_NOT_VERIFIED"
+        ? "Verify your email before signing in."
+        : code === "EMAIL_NOT_CONFIGURED" || code === "EMAIL_SEND_FAILED"
+        ? "We couldn't send the verification link. Please try again later."
         : code === "INVALID_CREDENTIALS"
         ? "Invalid email or password."
         : code === "RATE_LIMITED"
@@ -57,6 +69,21 @@ export default function SignInPage() {
         ? "Account service is temporarily unavailable. Please try again."
         : "Something went wrong. Please try again.";
       setError(msg);
+    }
+    setLoading(false);
+  };
+
+  const handleResendVerification = async () => {
+    setError("");
+    setNotice("");
+    setLoading(true);
+    try {
+      await resendLocalVerification(email);
+      setNotice("If this address has an unverified account, a new link will arrive shortly. Check your inbox and spam folder.");
+    } catch (err: unknown) {
+      setError(errorCode(err) === "RATE_LIMITED"
+        ? "Too many requests. Please wait before trying again."
+        : "Verification email service is temporarily unavailable.");
     }
     setLoading(false);
   };
@@ -97,7 +124,7 @@ export default function SignInPage() {
               </h2>
               <p className="text-sm text-gray-500 mt-2">
                 {isSignUp
-                  ? "Create a store account without Firebase. Email verification is not available yet."
+                  ? "Verify your email to finish registration and securely link purchases."
                   : "Sign in to your account to continue shopping."}
               </p>
             </div>
@@ -106,6 +133,11 @@ export default function SignInPage() {
             {error && (
               <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs font-medium rounded">
                 {error}
+              </div>
+            )}
+            {notice && (
+              <div className="mb-4 p-3 bg-green-50 border border-green-200 text-green-800 text-xs font-medium rounded">
+                {notice}
               </div>
             )}
 
@@ -193,12 +225,28 @@ export default function SignInPage() {
               </button>
             </form>
 
+            {canResend && (
+              <button
+                type="button"
+                onClick={handleResendVerification}
+                disabled={loading || !email.trim()}
+                className="mt-3 w-full text-xs font-bold text-[var(--color-accent)] hover:underline disabled:opacity-50"
+              >
+                {loading ? "Please wait..." : "Resend verification email"}
+              </button>
+            )}
+
             {/* Toggle */}
             <div className="mt-8 text-center">
               <p className="text-sm text-gray-500">
                 {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
                 <button
-                  onClick={() => { setIsSignUp(!isSignUp); setError(""); }}
+                  onClick={() => {
+                    setIsSignUp(!isSignUp);
+                    setError("");
+                    setNotice("");
+                    setCanResend(false);
+                  }}
                   className="font-bold text-[var(--color-accent)] hover:underline"
                 >
                   {isSignUp ? "Sign In" : "Sign Up"}

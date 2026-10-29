@@ -13,12 +13,12 @@ $config = load_config();
 require_method('GET');
 customer_auth_start_session($config);
 
-$user = $_SESSION['customer'] ?? null;
-if (!is_array($user) || empty($user['id']) || empty($user['email'])) {
+$user = customer_auth_current_user($config);
+if ($user === null) {
     json_ok(['authenticated' => false, 'user' => null]);
 }
 
 json_ok([
     'authenticated' => true,
-    'user' => customer_auth_public_user($user),
+    'user' => $user,
 ]);

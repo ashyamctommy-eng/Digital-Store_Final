@@ -15,24 +15,26 @@
 - Added secure server-side GhostProxies API-key configuration and an admin data browser for stats, settings, pools, countries, locations, ASNs, and reseller data. Provider requests use `https://ghostproxies.net` and the `x-api-key` header.
 - Added Novita-powered product-description drafts to the admin product form. The browser calls an admin-protected PHP endpoint; the API key/model stay server-side, drafts are validated and editable, and no product is saved automatically.
 - Added a read-only Novita configuration test and a shared limit of 20 description requests per hour.
-- Added Firebase-independent email/password customer signup and sessions backed by the PHP API. Passwords are hashed on the server, account/session files are private, session cookies are HttpOnly and same-site, and auth attempts are rate-limited. Firebase Google sign-in and legacy Firebase email/password sign-in remain available.
+- Added Firebase-independent email/password signup with a 24-hour single-use Resend verification link. Unverified accounts cannot sign in; verification tokens are stored as hashes and kept in the URL fragment, and auth attempts are rate-limited.
+- Added verified-email order linking and a server-backed account order list. Only order summaries are returned in the list; credentials remain protected by the order retrieval token or the verified account's private ownership index. Account-owned orders can retrieve their delivery without the browser's old token.
 - Added VPS deployment and Nginx configuration notes in `DEPLOY-VPS.md` and `deploy/vps/nginx.conf`.
 
 ## Safety State and Blockers
 
 - Proxy checkout is deliberately blocked with `PROXY_FULFILLMENT_UNAVAILABLE`. Static proxy inventory is not delivered.
 - Do not enable proxy generation until a documented or sanitized successful `/api/proxy/generate` response confirms the credential fields and how retries/quota usage behave. The supplied status example does not confirm the generation response. Do not make a generate call without authorization to spend provider quota.
-- A customer proxy dashboard was requested but is not implemented. Current credential retrieval requires the unique per-order token; Firebase sign-in is not bound to order ownership on the server. GhostProxies `/api/stats` is account-wide, not a buyer-specific usage endpoint. Do not expose global stats or another buyer's credentials.
-- Local account email addresses are not verified and local accounts are not linked to historical order retrieval tokens. Do not use the signup session or an email match alone as order ownership proof.
+- Proxy dashboard remains incomplete. The account order list is implemented, but GhostProxies `/api/stats` is account-wide, not buyer-specific. Do not expose global stats or another buyer's credentials.
+- Order auto-linking requires a verified local PHP account and an exact normalized match to the ledger's `buyer_email`. Firebase/Google sessions do not establish a PHP account session and do not receive cross-device order access. Keep the original per-order token flow for guest and Firebase-only buyers.
+- Email signup requires Resend API key, verified sender address, and public HTTPS site URL configured on the VPS. Replit secrets do not transfer to the VPS.
 - Proxy refresh still depends on a documented/sanitized successful generation response and verified quota/retry behavior. Keep fulfillment and customer refresh blocked until those are confirmed.
 
 ## Verification
 
-- `npm run test:php` passes after the latest account-auth work:
-  - Requirements: 46 files and 169 project functions.
+- `npm run test:php` passes after verification and order-linking work:
+  - Requirements: 49 files and 177 project functions.
   - Unit tests: 303 passed.
   - Concurrency: 40 units claimed with no duplicate deliveries.
-  - HTTP tests: 172 passed.
+  - HTTP tests: 196 passed.
 - A live Novita API request using the configured runtime secrets returned valid JSON in the same format used by the draft endpoint. No secrets were printed or saved.
 - PHP lint, HTTP test shell syntax, and `git diff --check` pass.
 - Frontend typecheck and lint remain unverified because Next.js, React, Firebase, and ESLint dependencies are absent from the workspace install; the typecheck produces cascading missing-module errors. A previous dependency install was blocked by a security rejection.
@@ -53,6 +55,6 @@
 ## Next Actions
 
 1. Confirm the latest project delta is present on the target GitHub repository's `main` branch before deploying to the VPS.
-2. Add verified email ownership and server-side order-to-account binding before making account history or proxy credentials available across devices.
-3. Confirm GhostProxies' generate response and quota/idempotency behavior using a sanitized response before enabling proxy fulfillment.
+2. Configure and verify Resend on the VPS, then test signup, email verification and account-owned order retrieval on the public domain.
+3. Confirm GhostProxies' generate response and quota/idempotency behavior using a sanitized response before enabling proxy fulfillment or a customer proxy dashboard.
 4. Add automated offsite backups and a restore check before the VPS begins holding live orders.

@@ -13,13 +13,87 @@ require_once __DIR__ . '/dispatch.php';
 
 function email_is_configured(array $config): bool
 {
-    return trim((string) config_value($config, 'resend.api_key', '')) !== ''
-        && trim((string) config_value($config, 'resend.from', '')) !== '';
+    $key = trim((string) config_value($config, 'resend.api_key', ''));
+    $testTransport = defined('DHS_TEST_RESEND_ENDPOINT');
+    return ($key !== '' || $testTransport)
+        && trim((string) config_value($config, 'resend.from', '')) !== ''
+        && (bool) config_value($config, 'resend.enabled', true);
 }
 
 function email_escape(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+/** Sends a short-lived account verification link without logging the token. */
+function email_send_verification(array $config, array $user, string $token): array
+{
+    if (!email_is_configured($config)) {
+        return ['ok' => false, 'status' => 0, 'error' => 'Resend is not configured.'];
+    }
+    $to = trim((string) ($user['email'] ?? ''));
+    if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+        return ['ok' => false, 'status' => 0, 'error' => 'No valid account email.'];
+    }
+    $baseUrl = rtrim(trim((string) config_value($config, 'public_base_url', '')), '/');
+    if (preg_match('#^https://[^/]+#i', $baseUrl) !== 1) {
+        return ['ok' => false, 'status' => 0, 'error' => 'The public HTTPS site URL is not configured.'];
+    }
+    // Keep the bearer token in the URL fragment so web servers and access logs
+    // never receive it; the verify page submits it in a same-origin POST body.
+    $verifyUrl = $baseUrl . '/auth/verify#token=' . rawurlencode($token);
+    $name = email_escape((string) ($user['name'] ?? ''));
+    $storeName = email_escape((string) config_value($config, 'store_name', 'Digital Hub Shop'));
+    $safeUrl = email_escape($verifyUrl);
+    $payload = [
+        'from' => (string) config_value($config, 'resend.from'),
+        'to' => [$to],
+        'subject' => 'Verify your ' . (string) config_value($config, 'store_name', 'Digital Hub Shop') . ' account',
+        'html' => '<!doctype html><html><body style="margin:0;background:#f8f9fa;padding:24px">'
+            . '<div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #eceef1;padding:28px">'
+            . '<h1 style="font:700 22px Arial,sans-serif;color:#111827">' . $storeName . '</h1>'
+            . '<p style="font:14px/1.6 Arial,sans-serif;color:#374151">Hello ' . $name . ',</p>'
+            . '<p style="font:14px/1.6 Arial,sans-serif;color:#374151">Verify your email to finish setting up your account and securely link orders placed with this address.</p>'
+            . '<p style="margin:24px 0"><a href="' . $safeUrl . '" style="display:inline-block;background:#111827;color:#fff;padding:13px 20px;text-decoration:none;font:700 13px Arial,sans-serif">Verify email</a></p>'
+            . '<p style="font:12px/1.6 Arial,sans-serif;color:#6b7280">This link expires in 24 hours. If you did not create this account, you can ignore this message.</p>'
+            . '</div></body></html>',
+        'text' => "Hello " . (string) ($user['name'] ?? '') . ",\n\n"
+            . "Verify your email and finish setting up your account:\n" . $verifyUrl
+            . "\n\nThis link expires in 24 hours. If you did not create this account, ignore this message.",
+    ];
+    $replyTo = trim((string) config_value($config, 'resend.reply_to', ''));
+    if ($replyTo !== '') {
+        $payload['reply_to'] = $replyTo;
+    }
+
+    // The local HTTP suite may point this at its isolated Resend stub. The
+    // constant is defined only by tests/router.php, never by production code.
+    $endpoint = defined('DHS_TEST_RESEND_ENDPOINT')
+        ? (string) DHS_TEST_RESEND_ENDPOINT
+        : 'https://api.resend.com/emails';
+    $res = http_json_request(
+        'POST',
+        $endpoint,
+        [
+            'Authorization' => 'Bearer ' . (string) config_value($config, 'resend.api_key'),
+            'Content-Type' => 'application/json',
+        ],
+        $payload,
+        20
+    );
+    $ok = $res['error'] === null && $res['status'] >= 200 && $res['status'] < 300;
+    if (function_exists('store_log')) {
+        store_log($config, 'email.verification', [
+            'to_hash' => hash('sha256', strtolower($to)),
+            'ok' => $ok,
+            'status' => $res['status'],
+        ]);
+    }
+    return [
+        'ok' => $ok,
+        'status' => $res['status'],
+        'error' => $ok ? null : ($res['error'] ?? (string) ($res['body']['message'] ?? 'Send failed')),
+    ];
 }
 
 /** Builds the HTML body listing an order's credentials. */
@@ -171,9 +245,12 @@ function email_send_credentials(array $config, array $order, array $deliverables
         $payload['reply_to'] = $replyTo;
     }
 
+    $endpoint = defined('DHS_TEST_RESEND_ENDPOINT')
+        ? (string) DHS_TEST_RESEND_ENDPOINT
+        : 'https://api.resend.com/emails';
     $res = http_json_request(
         'POST',
-        'https://api.resend.com/emails',
+        $endpoint,
         [
             'Authorization' => 'Bearer ' . (string) config_value($config, 'resend.api_key'),
             'Content-Type' => 'application/json',

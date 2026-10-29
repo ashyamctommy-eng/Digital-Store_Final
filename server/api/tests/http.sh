@@ -21,15 +21,18 @@ ECHO_STUB_PORT="${ECHO_STUB_PORT:-8907}"
 PX_ELITE_PORT="${PX_ELITE_PORT:-8908}"
 PX_ANON_PORT="${PX_ANON_PORT:-8909}"
 PX_TRANSPORT_PORT="${PX_TRANSPORT_PORT:-8910}"
+RESEND_PORT="${RESEND_PORT:-8911}"
 BASE="http://127.0.0.1:${PORT}/api"
 STUB_BASE="http://127.0.0.1:${STUB_PORT}/api/v1"
 
 DATA_DIR="$(mktemp -d)"
 STUB_STATE="$(mktemp)"
+RESEND_STATE="$(mktemp)"
 CONFIG_FILE="$API_DIR/config.php"
 CONFIG_BACKUP=""
 SERVER_PID=""
 STUB_PID=""
+RESEND_PID=""
 STUB_PIDS=""
 
 PASS=0
@@ -116,9 +119,10 @@ fire_paid_ipn() { # fire_paid_ipn <orderId> -> marks the order paid through the 
 cleanup() {
   [ -n "$SERVER_PID" ] && kill "$SERVER_PID" 2>/dev/null
   [ -n "$STUB_PID" ] && kill "$STUB_PID" 2>/dev/null
+  [ -n "$RESEND_PID" ] && kill "$RESEND_PID" 2>/dev/null
   for pid in $STUB_PIDS; do kill "$pid" 2>/dev/null; done
   if [ -n "$CONFIG_BACKUP" ]; then mv "$CONFIG_BACKUP" "$CONFIG_FILE"; else rm -f "$CONFIG_FILE"; fi
-  rm -rf "$DATA_DIR" "$STUB_STATE"
+  rm -rf "$DATA_DIR" "$STUB_STATE" "$RESEND_STATE" "$RESEND_STATE.lock"
 }
 trap cleanup EXIT
 
@@ -143,7 +147,7 @@ return [
     // A fake key so the pricing checks are reachable: the configured gate runs
     // before them by design, so an unconfigured gateway would mask the result.
     'nowpayments' => ['api_key' => 'np_test_fake', 'ipn_secret' => 'ipn-secret-123', 'api_base' => 'https://api.nowpayments.invalid/v1'],
-    'resend' => ['api_key' => '', 'from' => 'Test <t@example.test>'],
+    'resend' => ['api_key' => '', 'from' => 'Test <t@example.test>', 'enabled' => true],
     'proxycheck' => [
         // The reflector and the proxies are all on localhost here, so private
         // addresses must be allowed for the CHECKER.
@@ -160,7 +164,9 @@ PHPEOF
 
 SMSOTP_STUB_STATE="$STUB_STATE" "$PHP_BIN" -S "127.0.0.1:${STUB_PORT}" "$API_DIR/tests/smsotp-stub.php" >/tmp/dhs-stub.log 2>&1 &
 STUB_PID=$!
-"$PHP_BIN" -S "127.0.0.1:${PORT}" -t "$API_DIR" "$API_DIR/tests/router.php" >/tmp/dhs-http-server.log 2>&1 &
+DHS_RESEND_STATE="$RESEND_STATE" "$PHP_BIN" -S "127.0.0.1:${RESEND_PORT}" "$API_DIR/tests/resend-stub.php" >/tmp/dhs-resend-stub.log 2>&1 &
+RESEND_PID=$!
+DHS_TEST_RESEND_ENDPOINT="http://127.0.0.1:${RESEND_PORT}/emails" "$PHP_BIN" -S "127.0.0.1:${PORT}" -t "$API_DIR" "$API_DIR/tests/router.php" >/tmp/dhs-http-server.log 2>&1 &
 SERVER_PID=$!
 
 # The reflector the checker measures anonymity against, and three forwarding
@@ -186,28 +192,119 @@ AUTH_EMAIL="signup-test-$(date +%s)-$$@example.test"
 AUTH_PASSWORD="StoreTest!Passphrase2026"
 AUTH_NAME="Local Test Customer"
 
-CODE=$(curl -s -o /tmp/dhs-auth-r.json -D /tmp/dhs-auth-h.txt -w '%{http_code}' -c "$AUTH_COOKIE" \
+AUTH_ORDER="ORDER_vpn-nord-1y_auth_$(date +%s)_$$"
+AUTH_ORDER_TOKEN="tok_auth_$(date +%s)_$$"
+"$PHP_BIN" "$API_DIR/tests/seed.php" "$DATA_DIR" "vpn-nord-1y" "$AUTH_ORDER" "$AUTH_ORDER_TOKEN" 1 1 "$AUTH_EMAIL" >/dev/null
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -D /tmp/dhs-auth-h.txt -w '%{http_code}' \
   -X POST "$BASE/auth/signup" -H "Origin: $AUTH_ORIGIN" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$AUTH_NAME\",\"email\":\"$AUTH_EMAIL\",\"password\":\"$AUTH_PASSWORD\"}")
-check "customer can sign up without Firebase -> 201" "201" "$CODE"
-check_contains "signup returns a public account" "\"email\":\"$AUTH_EMAIL\"" "$(cat /tmp/dhs-auth-r.json)"
-check_absent "signup never returns a password hash" 'password_hash' "$(cat /tmp/dhs-auth-r.json)"
-check_contains "session cookie is HttpOnly" 'HttpOnly' "$(cat /tmp/dhs-auth-h.txt)"
-check_contains "session cookie is SameSite=Lax" 'SameSite=Lax' "$(cat /tmp/dhs-auth-h.txt)"
+check "customer can sign up without Firebase -> 202" "202" "$CODE"
+check_contains "signup requires email verification" '"verification_required":true' "$(cat /tmp/dhs-auth-r.json)"
+check_absent "signup does not start an unverified session" 'Set-Cookie:' "$(cat /tmp/dhs-auth-h.txt)"
+
+OLD_VERIFY_TOKEN=$("$PHP_BIN" -r '
+  $messages = json_decode((string) file_get_contents($argv[1]), true) ?: [];
+  $text = (string) ($messages[0]["text"] ?? "");
+  echo preg_match("/token=([a-f0-9]{64})/", $text, $m) ? $m[1] : "";
+' "$RESEND_STATE")
+check "Resend stub received a verification message" "64" "${#OLD_VERIFY_TOKEN}"
+AUTH_ACCOUNT_PATH="$DATA_DIR/accounts/$(printf '%s' "$AUTH_EMAIL" | sha256sum | cut -d' ' -f1).json"
+check "pending account file is private" "600" "$(stat -c '%a' "$AUTH_ACCOUNT_PATH")"
+check_contains "only the verification-token hash is stored" '"email_verification_hash": "' "$(cat "$AUTH_ACCOUNT_PATH")"
+check_absent "raw verification token is not stored" "$OLD_VERIFY_TOKEN" "$(cat "$AUTH_ACCOUNT_PATH")"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  -X POST "$BASE/auth/verification-resend" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' -d "{\"email\":\"$AUTH_EMAIL\"}")
+check "customer can request a replacement verification link -> 202" "202" "$CODE"
+VERIFY_TOKEN=$("$PHP_BIN" -r '
+  $messages = json_decode((string) file_get_contents($argv[1]), true) ?: [];
+  foreach (array_reverse($messages) as $message) {
+    if (($message["to"][0] ?? "") === $argv[2]) {
+      $text = (string) ($message["text"] ?? "");
+      echo preg_match("/token=([a-f0-9]{64})/", $text, $m) ? $m[1] : "";
+      exit;
+    }
+  }
+' "$RESEND_STATE" "$AUTH_EMAIL")
+check "resend issues a new token" "64" "${#VERIFY_TOKEN}"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  -X POST "$BASE/auth/verify" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' -d "{\"token\":\"$OLD_VERIFY_TOKEN\"}")
+check "resend invalidates the previous token -> 400" "400" "$CODE"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  -X POST "$BASE/auth/login" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$AUTH_EMAIL\",\"password\":\"$AUTH_PASSWORD\"}")
+check "unverified account sign-in is blocked -> 403" "403" "$CODE"
+check_contains "unverified sign-in has a clear error code" '"errorCode":"EMAIL_NOT_VERIFIED"' "$(cat /tmp/dhs-auth-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -D /tmp/dhs-auth-h.txt -w '%{http_code}' -c "$AUTH_COOKIE" \
+  -X POST "$BASE/auth/verify" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' -d "{\"token\":\"$VERIFY_TOKEN\"}")
+check "verification consumes the email token and starts a session -> 200" "200" "$CODE"
+check_contains "verified session cookie is HttpOnly" 'HttpOnly' "$(cat /tmp/dhs-auth-h.txt)"
+check_contains "verified session cookie is SameSite=Lax" 'SameSite=Lax' "$(cat /tmp/dhs-auth-h.txt)"
+check_absent "verification response never returns a password hash" 'password_hash' "$(cat /tmp/dhs-auth-r.json)"
+
+CODE=$(fire_paid_ipn "$AUTH_ORDER")
+check "verified customer's seeded purchase settles -> 200" "200" "$CODE"
+sleep 0.6
 
 CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
   "$BASE/auth/me" -b "$AUTH_COOKIE")
-check "the new account gets a server session -> 200" "200" "$CODE"
-check_contains "session profile is authenticated" '"authenticated":true' "$(cat /tmp/dhs-auth-r.json)"
+check "verified account session is active -> 200" "200" "$CODE"
+check_contains "session profile reports verified email" '"email_verified":true' "$(cat /tmp/dhs-auth-r.json)"
 check_contains "session profile contains the account email" "\"email\":\"$AUTH_EMAIL\"" "$(cat /tmp/dhs-auth-r.json)"
 check_absent "session profile never returns the password hash" 'password_hash' "$(cat /tmp/dhs-auth-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' "$BASE/orders/account" -b "$AUTH_COOKIE")
+check "verified account gets orders matching its email -> 200" "200" "$CODE"
+check_contains "account order list includes its linked order" "\"order_id\":\"$AUTH_ORDER\"" "$(cat /tmp/dhs-auth-r.json)"
+check_contains "account order list marks server ownership" '"account_owned":true' "$(cat /tmp/dhs-auth-r.json)"
+check_absent "account order list does not expose retrieval tokens" 'order_token' "$(cat /tmp/dhs-auth-r.json)"
+check_absent "account order list does not expose delivered secrets" 'secret' "$(cat /tmp/dhs-auth-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  "$BASE/orders/credentials?order_id=$AUTH_ORDER" -b "$AUTH_COOKIE")
+check "account session can retrieve its linked order without a local token -> 200" "200" "$CODE"
+check_contains "linked account receives its purchased credential" '"account_data":"SEED1|secret1|buyer1@example.test"' "$(cat /tmp/dhs-auth-r.json)"
+
+OTHER_COOKIE="$(mktemp)"
+OTHER_EMAIL="unrelated-test-$(date +%s)-$$@example.test"
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  -X POST "$BASE/auth/signup" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Unrelated Customer\",\"email\":\"$OTHER_EMAIL\",\"password\":\"$AUTH_PASSWORD\"}")
+check "a separate customer can register -> 202" "202" "$CODE"
+OTHER_VERIFY_TOKEN=$("$PHP_BIN" -r '
+  $messages = json_decode((string) file_get_contents($argv[1]), true) ?: [];
+  foreach (array_reverse($messages) as $message) {
+    if (($message["to"][0] ?? "") === $argv[2]) {
+      $text = (string) ($message["text"] ?? "");
+      echo preg_match("/token=([a-f0-9]{64})/", $text, $m) ? $m[1] : "";
+      exit;
+    }
+  }
+' "$RESEND_STATE" "$OTHER_EMAIL")
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' -c "$OTHER_COOKIE" \
+  -X POST "$BASE/auth/verify" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' -d "{\"token\":\"$OTHER_VERIFY_TOKEN\"}")
+check "second customer's email can be verified -> 200" "200" "$CODE"
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  "$BASE/orders/credentials?order_id=$AUTH_ORDER" -b "$OTHER_COOKIE")
+check "another verified account cannot read this order -> 403" "403" "$CODE"
+rm -f "$OTHER_COOKIE"
 
 CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
   -X POST "$BASE/auth/signup" -H "Origin: $AUTH_ORIGIN" \
   -H 'Content-Type: application/json' \
   -d "{\"name\":\"$AUTH_NAME\",\"email\":\"$AUTH_EMAIL\",\"password\":\"$AUTH_PASSWORD\"}")
-check "duplicate signup is rejected -> 409" "409" "$CODE"
+check "duplicate signup avoids revealing account status -> 202" "202" "$CODE"
 
 CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
   -X POST "$BASE/auth/login" -H "Origin: $AUTH_ORIGIN" \
@@ -230,6 +327,9 @@ CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
   "$BASE/auth/me" -b "$AUTH_COOKIE")
 check "signed-out session is no longer authenticated" "200" "$CODE"
 check_contains "signed-out state is explicit" '"authenticated":false' "$(cat /tmp/dhs-auth-r.json)"
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  "$BASE/orders/credentials?order_id=$AUTH_ORDER")
+check "unlinked public request still needs its retrieval token -> 403" "403" "$CODE"
 
 CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
   -X POST "$BASE/auth/login" -H 'Origin: https://attacker.example' \
@@ -240,6 +340,7 @@ check "cross-origin login attempts are rejected -> 403" "403" "$CODE"
 AUTH_ACCOUNT_PATH="$DATA_DIR/accounts/$(printf '%s' "$AUTH_EMAIL" | sha256sum | cut -d' ' -f1).json"
 check "password hash is stored in the private account file" "600" "$(stat -c '%a' "$AUTH_ACCOUNT_PATH")"
 check_contains "password is stored as a one-way hash" '"password_hash": "$2' "$(cat "$AUTH_ACCOUNT_PATH")"
+check_absent "verification token is removed after use" 'email_verification_hash' "$(cat "$AUTH_ACCOUNT_PATH")"
 rm -f "$AUTH_COOKIE"
 
 echo

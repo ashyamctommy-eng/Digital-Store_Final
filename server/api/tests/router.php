@@ -24,6 +24,13 @@ if ($path === '') {
 
 $target = $docroot . $path;
 
+if (!defined('DHS_TEST_RESEND_ENDPOINT')) {
+    $testEndpoint = getenv('DHS_TEST_RESEND_ENDPOINT');
+    if (is_string($testEndpoint) && $testEndpoint !== '') {
+        define('DHS_TEST_RESEND_ENDPOINT', $testEndpoint);
+    }
+}
+
 if (is_file($target)) {
     return false; // let the server serve it directly
 }

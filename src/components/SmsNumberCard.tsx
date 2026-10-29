@@ -9,6 +9,7 @@ interface SmsNumberCardProps {
   cred: DeliveredCredential;
   orderId: string;
   token: string;
+  accountOwned?: boolean;
 }
 
 /** Only plain http(s) links are ever embedded. */
@@ -48,7 +49,12 @@ function iframeSandbox(url: string): string {
  * on demand have no link — the code lives with the provider — so the embedded
  * view polls our own endpoint instead, which keeps the buyer on the page.
  */
-export default function SmsNumberCard({ cred, orderId, token }: SmsNumberCardProps) {
+export default function SmsNumberCard({
+  cred,
+  orderId,
+  token,
+  accountOwned = false,
+}: SmsNumberCardProps) {
   const [copied, setCopied] = useState(false);
   const [showInbox, setShowInbox] = useState(false);
 
@@ -63,7 +69,7 @@ export default function SmsNumberCard({ cred, orderId, token }: SmsNumberCardPro
   const smsText = live?.text ?? null;
   // Derived, not stored: the card is listening whenever a dynamic number has
   // no code yet.
-  const listening = isDynamic && !code && Boolean(token);
+  const listening = isDynamic && !code && (Boolean(token) || accountOwned);
 
   const copyNumber = useCallback(async () => {
     const ok = await copyText(phone);
@@ -76,7 +82,7 @@ export default function SmsNumberCard({ cred, orderId, token }: SmsNumberCardPro
   // Poll for on-demand numbers while the card is open and the code has not
   // arrived yet. Stops as soon as it does.
   useEffect(() => {
-    if (!isDynamic || code || !token) return;
+    if (!isDynamic || code || (!token && !accountOwned)) return;
     let cancelled = false;
 
     const tick = async () => {
@@ -98,7 +104,7 @@ export default function SmsNumberCard({ cred, orderId, token }: SmsNumberCardPro
       cancelled = true;
       clearInterval(timer);
     };
-  }, [isDynamic, code, token, orderId, cred.uid]);
+  }, [isDynamic, code, token, orderId, cred.uid, accountOwned]);
 
   return (
     <li className="p-4">

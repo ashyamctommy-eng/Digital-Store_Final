@@ -60,9 +60,11 @@ export function buildAccountReference(items: CartItem[]): string {
 export type OrderStatus =
   | "pending"
   | "paid"
+  | "delivered"
   | "failed"
   | "cancelled"
   | "expired"
+  | "refunded"
   | "unknown";
 
 export interface OrderStatusResponse {
@@ -111,7 +113,10 @@ async function postJson<T>(path: string, body: unknown): Promise<ApiResult<T>> {
 
 async function getJson<T>(path: string): Promise<ApiResult<T>> {
   try {
-    const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+    const res = await fetch(`${API_BASE}${path}`, {
+      credentials: "same-origin",
+      cache: "no-store",
+    });
     const json = await res.json().catch(() => null);
     if (!res.ok || !json) {
       return { ok: false, error: json?.error ?? `Request failed (${res.status})` };
@@ -366,6 +371,25 @@ export interface CredentialsResponse {
   items?: OrderLine[];
 }
 
+export interface AccountOrder {
+  order_id: string;
+  status: OrderStatus;
+  gateway?: string;
+  currency?: string;
+  amount?: number | string | null;
+  created_at: string;
+  delivered_at?: string | null;
+  items: { product_id: string; name: string; quantity: number }[];
+  shortfall?: Record<string, number>;
+  account_owned: true;
+}
+
+export async function fetchAccountOrders(): Promise<
+  ApiResult<{ orders: AccountOrder[] }>
+> {
+  return getJson<{ orders: AccountOrder[] }>("/orders/account");
+}
+
 /**
  * Fetches the credentials for a paid order.
  *
@@ -374,10 +398,13 @@ export interface CredentialsResponse {
  */
 export async function fetchCredentials(
   orderId: string,
-  token: string
+  token?: string
 ): Promise<ApiResult<CredentialsResponse>> {
+  const tokenQuery = token
+    ? `&token=${encodeURIComponent(token)}`
+    : "";
   return getJson<CredentialsResponse>(
-    `/orders/credentials?order_id=${encodeURIComponent(orderId)}&token=${encodeURIComponent(token)}`
+    `/orders/credentials?order_id=${encodeURIComponent(orderId)}${tokenQuery}`
   );
 }
 
@@ -389,10 +416,13 @@ export async function fetchCredentials(
  */
 export async function fetchSmsStatus(
   orderId: string,
-  token: string
+  token?: string
 ): Promise<ApiResult<SmsStatusResponse>> {
+  const tokenQuery = token
+    ? `&token=${encodeURIComponent(token)}`
+    : "";
   return getJson<SmsStatusResponse>(
-    `/orders/sms-status?order_id=${encodeURIComponent(orderId)}&token=${encodeURIComponent(token)}`
+    `/orders/sms-status?order_id=${encodeURIComponent(orderId)}${tokenQuery}`
   );
 }
 
@@ -456,11 +486,11 @@ export interface ProxyCheckResponse {
  */
 export async function verifyOrderProxies(
   orderId: string,
-  token: string
+  token?: string
 ): Promise<ApiResult<ProxyCheckResponse>> {
   return postJson<ProxyCheckResponse>(`/orders/proxies-check`, {
     order_id: orderId,
-    token,
+    ...(token ? { token } : {}),
   });
 }
 

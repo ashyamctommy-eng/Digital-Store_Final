@@ -8,6 +8,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../lib/http.php';
 require_once __DIR__ . '/../lib/auth.php';
+require_once __DIR__ . '/../lib/email.php';
 
 $config = load_config();
 require_method('POST');
@@ -32,14 +33,35 @@ $passwordLength = function_exists('mb_strlen') ? mb_strlen($password, 'UTF-8') :
 if ($passwordLength < 12 || $passwordLength > 128 || strlen($password) > 1024) {
     json_error('Use a password between 12 and 128 characters.', 422, 'WEAK_PASSWORD');
 }
+if (!email_is_configured($config)) {
+    json_error('Email verification is temporarily unavailable. Please try again later.', 503, 'EMAIL_NOT_CONFIGURED');
+}
 
-$created = customer_auth_create_user($config, $email, $name, $password);
+$token = bin2hex(random_bytes(32));
+$created = customer_auth_create_user(
+    $config,
+    $email,
+    $name,
+    $password,
+    hash('sha256', $token),
+    time() + 86400
+);
 if (!$created['ok']) {
     if (($created['error'] ?? '') === 'EMAIL_ALREADY_REGISTERED') {
-        json_error('An account with this email already exists. Sign in instead.', 409, 'EMAIL_ALREADY_REGISTERED');
+        $existing = customer_auth_read_user($config, $email);
+        if ($existing !== null && empty($existing['email_verified_at'])) {
+            $issued = customer_auth_issue_verification($config, $email);
+            if ($issued !== null) {
+                email_send_verification($config, $issued, (string) $issued['verification_token']);
+            }
+        }
+        json_response(['verification_required' => true], 202);
     }
     json_error('Account service is temporarily unavailable.', 503, 'AUTH_STORAGE_UNAVAILABLE');
 }
 
-customer_auth_login_session($config, $created['user']);
-json_response(['user' => customer_auth_public_user($created['user'])], 201);
+$sent = email_send_verification($config, $created['user'], $token);
+if (!$sent['ok']) {
+    json_error('We could not send the verification email. Use the resend option or try again later.', 503, 'EMAIL_SEND_FAILED');
+}
+json_response(['verification_required' => true], 202);

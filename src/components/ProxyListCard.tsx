@@ -15,6 +15,7 @@ interface ProxyListCardProps {
   /** Needed to authorise the check; only this order's addresses are tested. */
   orderId?: string;
   token?: string;
+  accountOwned?: boolean;
 }
 
 const ANON_LABEL: Record<string, string> = {
@@ -40,7 +41,12 @@ const ANON_TONE: Record<string, string> = {
  * Results are rendered in the order the server ranked them (best first), so the
  * good addresses are at the top of the list.
  */
-export default function ProxyListCard({ cred, orderId, token }: ProxyListCardProps) {
+export default function ProxyListCard({
+  cred,
+  orderId,
+  token,
+  accountOwned = false,
+}: ProxyListCardProps) {
   const [copiedAll, setCopiedAll] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
@@ -133,7 +139,7 @@ export default function ProxyListCard({ cred, orderId, token }: ProxyListCardPro
   );
 
   const check = useCallback(async () => {
-    if (!orderId || !token) {
+    if (!orderId || (!token && !accountOwned)) {
       setCheckError("This order cannot be verified from here.");
       return;
     }
@@ -152,7 +158,7 @@ export default function ProxyListCard({ cred, orderId, token }: ProxyListCardPro
       median_latency_ms: res.data.summary.median_latency_ms,
     });
     if (res.data.error) setCheckError(res.data.error);
-  }, [orderId, token]);
+  }, [orderId, token, accountOwned]);
 
   const download = useCallback(() => {
     const lines = [
@@ -331,7 +337,7 @@ export default function ProxyListCard({ cred, orderId, token }: ProxyListCardPro
         <button
           type="button"
           onClick={check}
-          disabled={checking || addresses.length === 0 || !token}
+          disabled={checking || addresses.length === 0 || (!token && !accountOwned)}
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-[var(--color-line)] text-[11px] font-bold hover:border-[var(--color-brand)] transition-colors disabled:opacity-50"
         >
           {checking ? (

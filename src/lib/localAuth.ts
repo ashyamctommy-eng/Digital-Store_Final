@@ -6,6 +6,7 @@ export interface LocalAccount {
   id: string;
   email: string;
   name: string;
+  emailVerified: boolean;
 }
 
 export class LocalAuthError extends Error {
@@ -47,7 +48,8 @@ export async function getLocalAccount(): Promise<LocalAccount | null> {
     if (
       typeof candidate.id !== "string" ||
       typeof candidate.email !== "string" ||
-      typeof candidate.name !== "string"
+      typeof candidate.name !== "string" ||
+      typeof candidate.email_verified !== "boolean"
     ) {
       return null;
     }
@@ -55,6 +57,7 @@ export async function getLocalAccount(): Promise<LocalAccount | null> {
       id: candidate.id,
       email: candidate.email,
       name: candidate.name,
+      emailVerified: candidate.email_verified,
     };
   } catch {
     return null;
@@ -62,7 +65,7 @@ export async function getLocalAccount(): Promise<LocalAccount | null> {
 }
 
 async function postAccount(
-  endpoint: "signup" | "login" | "logout",
+  endpoint: "signup" | "login" | "logout" | "verify" | "verification-resend",
   payload: Record<string, string> = {},
 ): Promise<Record<string, unknown>> {
   let response: Response;
@@ -92,19 +95,28 @@ function readAccount(body: Record<string, unknown>): LocalAccount {
   if (
     typeof user.id !== "string" ||
     typeof user.email !== "string" ||
-    typeof user.name !== "string"
+    typeof user.name !== "string" ||
+    typeof user.email_verified !== "boolean"
   ) {
     throw new LocalAuthError("The account service returned an invalid response.", "INVALID_RESPONSE");
   }
-  return { id: user.id, email: user.email, name: user.name };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    emailVerified: user.email_verified,
+  };
 }
 
 export async function createLocalAccount(
   name: string,
   email: string,
   password: string,
-): Promise<LocalAccount> {
-  return readAccount(await postAccount("signup", { name, email, password }));
+): Promise<void> {
+  const body = await postAccount("signup", { name, email, password });
+  if (body.verification_required !== true) {
+    throw new LocalAuthError("The account service returned an invalid response.", "INVALID_RESPONSE");
+  }
 }
 
 export async function signInLocalAccount(
@@ -112,6 +124,14 @@ export async function signInLocalAccount(
   password: string,
 ): Promise<LocalAccount> {
   return readAccount(await postAccount("login", { email, password }));
+}
+
+export async function verifyLocalAccount(token: string): Promise<LocalAccount> {
+  return readAccount(await postAccount("verify", { token }));
+}
+
+export async function resendLocalVerification(email: string): Promise<void> {
+  await postAccount("verification-resend", { email });
 }
 
 export async function signOutLocalAccount(): Promise<void> {

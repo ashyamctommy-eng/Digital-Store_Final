@@ -21,6 +21,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../lib/http.php';
 require_once __DIR__ . '/../lib/store.php';
 require_once __DIR__ . '/../lib/smsotp.php';
+require_once __DIR__ . '/../lib/auth.php';
 
 $config = load_config();
 apply_cors($config);
@@ -38,8 +39,8 @@ if ($order === null) {
     json_error('Unknown order.', 404, 'ORDER_NOT_FOUND');
 }
 
-$expected = (string) ($order['order_token'] ?? '');
-if ($expected === '' || $token === '' || !hash_equals($expected, $token)) {
+$order['order_id'] = $orderId;
+if (!customer_auth_order_access_allowed($config, $order, $token)) {
     json_error('This link is not valid for that order.', 403, 'UNAUTHORIZED');
 }
 
