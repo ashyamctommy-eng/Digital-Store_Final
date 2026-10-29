@@ -4,16 +4,10 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
-import {
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  updateProfile,
-} from "firebase/auth";
-import { auth } from "@/lib/firebase";
 import { errorCode } from "@/lib/orders";
 
 export default function SignInPage() {
-  const { user, signInWithGoogle } = useAuth();
+  const { user, signInWithGoogle, signInWithEmail, signUpWithEmail } = useAuth();
   const router = useRouter();
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
@@ -36,24 +30,31 @@ export default function SignInPage() {
 
     try {
       if (isSignUp) {
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        if (name) {
-          await updateProfile(cred.user, { displayName: name });
-        }
+        await signUpWithEmail(name, email, password);
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        await signInWithEmail(email, password);
       }
       router.push("/");
     } catch (err: unknown) {
       const code = errorCode(err);
       const msg = code === "auth/email-already-in-use"
         ? "Email already registered. Try signing in."
-        : code === "auth/wrong-password" || code === "auth/user-not-found"
+        : code === "auth/wrong-password" ||
+          code === "auth/user-not-found" ||
+          code === "auth/invalid-credential"
         ? "Invalid email or password."
-        : code === "auth/weak-password"
-        ? "Password must be at least 6 characters."
-        : code === "auth/invalid-email"
+        : code === "WEAK_PASSWORD" || code === "auth/weak-password"
+        ? "Use a password with at least 12 characters."
+        : code === "INVALID_EMAIL" || code === "auth/invalid-email"
         ? "Please enter a valid email address."
+        : code === "EMAIL_ALREADY_REGISTERED"
+        ? "Email already registered. Try signing in."
+        : code === "INVALID_CREDENTIALS"
+        ? "Invalid email or password."
+        : code === "RATE_LIMITED"
+        ? "Too many attempts. Please wait a little and try again."
+        : code === "AUTH_SERVICE_UNAVAILABLE" || code === "AUTH_STORAGE_UNAVAILABLE"
+        ? "Account service is temporarily unavailable. Please try again."
         : "Something went wrong. Please try again.";
       setError(msg);
     }
@@ -96,7 +97,7 @@ export default function SignInPage() {
               </h2>
               <p className="text-sm text-gray-500 mt-2">
                 {isSignUp
-                  ? "Create an account to keep every purchase in your dashboard — forever."
+                  ? "Create a store account without Firebase. Email verification is not available yet."
                   : "Sign in to your account to continue shopping."}
               </p>
             </div>
@@ -176,8 +177,9 @@ export default function SignInPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  minLength={6}
-                  placeholder="••••••••"
+                    minLength={isSignUp ? 12 : 6}
+                    maxLength={128}
+                    placeholder={isSignUp ? "At least 12 characters" : "••••••••"}
                   className="w-full border border-gray-200 px-4 py-3 text-sm focus:outline-none focus:border-[var(--color-gold)] transition-colors"
                 />
               </div>

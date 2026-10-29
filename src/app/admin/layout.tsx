@@ -82,7 +82,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   const isAdmin =
-    !!user.email && ADMIN_EMAILS.includes(user.email.toLowerCase());
+    user.authProvider === "firebase" &&
+    !!user.email &&
+    ADMIN_EMAILS.includes(user.email.toLowerCase());
 
   if (!isAdmin) {
     return (

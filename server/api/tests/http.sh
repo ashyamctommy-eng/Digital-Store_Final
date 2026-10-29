@@ -179,6 +179,72 @@ sleep 1.5
 if ! kill -0 "$SERVER_PID" 2>/dev/null; then echo "server failed to start:"; cat /tmp/dhs-http-server.log; exit 1; fi
 if ! kill -0 "$STUB_PID" 2>/dev/null; then echo "stub failed to start:"; cat /tmp/dhs-stub.log; exit 1; fi
 
+# ---------------------------------------------------------------- account signup/sign-in, independent from Firebase
+AUTH_COOKIE="$(mktemp)"
+AUTH_ORIGIN="http://127.0.0.1:${PORT}"
+AUTH_EMAIL="signup-test-$(date +%s)-$$@example.test"
+AUTH_PASSWORD="StoreTest!Passphrase2026"
+AUTH_NAME="Local Test Customer"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -D /tmp/dhs-auth-h.txt -w '%{http_code}' -c "$AUTH_COOKIE" \
+  -X POST "$BASE/auth/signup" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$AUTH_NAME\",\"email\":\"$AUTH_EMAIL\",\"password\":\"$AUTH_PASSWORD\"}")
+check "customer can sign up without Firebase -> 201" "201" "$CODE"
+check_contains "signup returns a public account" "\"email\":\"$AUTH_EMAIL\"" "$(cat /tmp/dhs-auth-r.json)"
+check_absent "signup never returns a password hash" 'password_hash' "$(cat /tmp/dhs-auth-r.json)"
+check_contains "session cookie is HttpOnly" 'HttpOnly' "$(cat /tmp/dhs-auth-h.txt)"
+check_contains "session cookie is SameSite=Lax" 'SameSite=Lax' "$(cat /tmp/dhs-auth-h.txt)"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  "$BASE/auth/me" -b "$AUTH_COOKIE")
+check "the new account gets a server session -> 200" "200" "$CODE"
+check_contains "session profile is authenticated" '"authenticated":true' "$(cat /tmp/dhs-auth-r.json)"
+check_contains "session profile contains the account email" "\"email\":\"$AUTH_EMAIL\"" "$(cat /tmp/dhs-auth-r.json)"
+check_absent "session profile never returns the password hash" 'password_hash' "$(cat /tmp/dhs-auth-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  -X POST "$BASE/auth/signup" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"$AUTH_NAME\",\"email\":\"$AUTH_EMAIL\",\"password\":\"$AUTH_PASSWORD\"}")
+check "duplicate signup is rejected -> 409" "409" "$CODE"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  -X POST "$BASE/auth/login" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$AUTH_EMAIL\",\"password\":\"incorrect-password\"}")
+check "wrong password is rejected -> 401" "401" "$CODE"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' -c "$AUTH_COOKIE" \
+  -X POST "$BASE/auth/login" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$(printf '%s' "$AUTH_EMAIL" | tr '[:lower:]' '[:upper:]')\",\"password\":\"$AUTH_PASSWORD\"}")
+check "customer can sign in with the local account -> 200" "200" "$CODE"
+check_absent "sign-in never returns a password hash" 'password_hash' "$(cat /tmp/dhs-auth-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  -X POST "$BASE/auth/logout" -H "Origin: $AUTH_ORIGIN" \
+  -H 'Content-Type: application/json' -b "$AUTH_COOKIE" -c "$AUTH_COOKIE" -d '{}')
+check "customer can sign out -> 200" "200" "$CODE"
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  "$BASE/auth/me" -b "$AUTH_COOKIE")
+check "signed-out session is no longer authenticated" "200" "$CODE"
+check_contains "signed-out state is explicit" '"authenticated":false' "$(cat /tmp/dhs-auth-r.json)"
+
+CODE=$(curl -s -o /tmp/dhs-auth-r.json -w '%{http_code}' \
+  -X POST "$BASE/auth/login" -H 'Origin: https://attacker.example' \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$AUTH_EMAIL\",\"password\":\"$AUTH_PASSWORD\"}")
+check "cross-origin login attempts are rejected -> 403" "403" "$CODE"
+
+AUTH_ACCOUNT_PATH="$DATA_DIR/accounts/$(printf '%s' "$AUTH_EMAIL" | sha256sum | cut -d' ' -f1).json"
+check "password hash is stored in the private account file" "600" "$(stat -c '%a' "$AUTH_ACCOUNT_PATH")"
+check_contains "password is stored as a one-way hash" '"password_hash": "$2' "$(cat "$AUTH_ACCOUNT_PATH")"
+rm -f "$AUTH_COOKIE"
+
+echo
+echo -e "\033[1mRouting & config\033[0m"
+
 echo
 echo -e "\033[1mRouting & config\033[0m"
 

@@ -41,9 +41,8 @@ export const DELIVERY = {
 /**
  * Accounts allowed into /admin.
  *
- * This gate is a UI convenience only — it runs in the browser and can be
- * bypassed. Real protection must come from Firestore security rules scoped to
- * these same addresses.
+ * This gate only controls the browser admin pages. Admin API endpoints enforce
+ * the server-side admin_api_key independently.
  */
 export const ADMIN_EMAILS: string[] = [
   "wildpharmtech9@gmail.com",

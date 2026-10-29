@@ -17,6 +17,10 @@ into client JavaScript.
 | GET | `/api/inventory/counts` | Public stock counts, `COUNT(available)` + `dynamic` |
 | GET | `/api/orders/credentials?order_id&token` | Credentials for a paid order |
 | GET | `/api/orders/sms-status?order_id&token` | Live inbox feed for SMS numbers |
+| POST | `/api/auth/signup` | Create a first-party customer account |
+| POST | `/api/auth/login` | Sign in to a first-party customer account |
+| GET | `/api/auth/me` | Read the current first-party customer session |
+| POST | `/api/auth/logout` | End the current first-party customer session |
 | GET | `/api/admin/smsotp-status` | Provider balance + service list (admin key) |
 | GET | `/api/admin/settings` | Configurable settings + setup checklist (admin key) |
 | POST | `/api/admin/settings` | Save allow-listed settings (admin key) |
@@ -29,6 +33,19 @@ into client JavaScript.
 
 `api/.htaccess` rewrites the extensionless paths onto the `.php` files and
 hard-blocks `lib/`, `data/` and `config.php` from HTTP.
+
+Email/password signup and login are handled by the PHP API, not Firebase. Password
+hashes and PHP session files stay in the private `data_dir`; the session cookie
+is HttpOnly, SameSite=Lax, and Secure on HTTPS. Signup requires a 12-character
+password, and the API rate-limits signup/login attempts. Firebase Google sign-in
+remains available, and old Firebase email/password accounts may still sign in
+through the existing-provider fallback. New local accounts are not admin
+accounts, even if their email matches the browser's admin allow-list.
+
+Email ownership is not verified yet, and local accounts are not linked to the
+per-order retrieval tokens. Do not use an account email alone to expose orders
+or proxy credentials until email verification and server-side order ownership
+binding are added.
 
 Novita credentials are configured as `NOVITA_API_KEY` and `NOVITA_MODEL` on the
 server, or in Super Admin → Configurations. The AI endpoint is admin-protected,
