@@ -43,12 +43,12 @@ function email_send_verification(array $config, array $user, string $token): arr
     // never receive it; the verify page submits it in a same-origin POST body.
     $verifyUrl = $baseUrl . '/auth/verify#token=' . rawurlencode($token);
     $name = email_escape((string) ($user['name'] ?? ''));
-    $storeName = email_escape((string) config_value($config, 'store_name', 'Digital Hub Shop'));
+    $storeName = email_escape((string) config_value($config, 'store_name', 'Outlawz Store'));
     $safeUrl = email_escape($verifyUrl);
     $payload = [
         'from' => (string) config_value($config, 'resend.from'),
         'to' => [$to],
-        'subject' => 'Verify your ' . (string) config_value($config, 'store_name', 'Digital Hub Shop') . ' account',
+        'subject' => 'Verify your ' . (string) config_value($config, 'store_name', 'Outlawz Store') . ' account',
         'html' => '<!doctype html><html><body style="margin:0;background:#f8f9fa;padding:24px">'
             . '<div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #eceef1;padding:28px">'
             . '<h1 style="font:700 22px Arial,sans-serif;color:#111827">' . $storeName . '</h1>'
@@ -100,7 +100,7 @@ function email_send_verification(array $config, array $user, string $token): arr
 function email_credentials_html(array $config, array $order, array $deliverables): string
 {
     $orderId = email_escape((string) ($order['order_id'] ?? ''));
-    $storeName = email_escape((string) config_value($config, 'store_name', 'Digital Hub Shop'));
+    $storeName = email_escape((string) config_value($config, 'store_name', 'Outlawz Store'));
 
     $rows = '';
     $current = null;

@@ -265,7 +265,7 @@ function dispatch_render_text(array $order, array $deliverables, bool $includeTo
     $orderId = (string) ($order['order_id'] ?? '');
     $lines = [];
     $lines[] = '==============================================';
-    $lines[] = '  DIGITAL HUB SHOP — ORDER ' . $orderId;
+    $lines[] = '  OUTLAWZ STORE — ORDER ' . $orderId;
     $lines[] = '==============================================';
     $lines[] = '';
     if (!empty($order['created_at'])) {

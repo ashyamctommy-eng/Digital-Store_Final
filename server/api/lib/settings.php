@@ -50,7 +50,7 @@ function settings_schema(): array
             'group' => 'general',
             'label' => 'Store name',
             'type' => 'text',
-            'default' => 'Digital Hub Shop',
+            'default' => 'Outlawz Store',
             'hint' => 'Shown in emails and on order exports.',
         ],
         'public_base_url' => [
@@ -166,7 +166,7 @@ function settings_schema(): array
             'group' => 'resend',
             'label' => 'From address',
             'type' => 'text',
-            'placeholder' => 'Digital Hub Shop <orders@your-domain>',
+            'placeholder' => 'Outlawz Store <orders@your-domain>',
             'hint' => 'The domain must be verified in Resend or delivery silently fails.',
         ],
         'resend.reply_to' => [

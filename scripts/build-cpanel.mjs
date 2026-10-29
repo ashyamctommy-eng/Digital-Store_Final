@@ -175,20 +175,21 @@ async function main() {
   console.log(`
   Next steps
   ----------
-  1. Upload the CONTENTS of dist/ to your domain's document root
-     (usually public_html/) via cPanel File Manager or FTP.
-  2. On a Debian/Ubuntu VPS, point DNS to the server and run
-     sudo bash installer.sh from the document root. Enter the domain and
-     admin email/password; the installer sets live mode, private storage,
-     Nginx, and HTTPS automatically. Use --sandbox for test payments.
-     On shared hosting, run bash installer.sh --app-only instead.
-  3. Sign in at /admin, then add payment/provider credentials under
+  1. VPS: clone the GitHub repository and follow DEPLOY-VPS.md. It builds the
+     bundle on the VPS, deploys to /var/www/outlawz-store, and configures
+     https://outlawz.tech with Nginx and HTTPS.
+  2. cPanel/Hostinger: upload the CONTENTS of dist/ to the document root
+     (usually public_html/) via File Manager or FTP.
+  3. On shared hosting, run bash installer.sh --app-only from that document root.
+     The installer asks for the domain and admin email/password; use --sandbox
+     for test payments. Live mode can accept real transactions.
+  4. Sign in at /admin, then add payment/provider credentials under
      Configurations. Do not paste keys into this installer or README.
-  4. Point the Palplus channel callback and the NOWPayments IPN at
+  5. Point the Palplus channel callback and the NOWPayments IPN at
      https://<your-domain>/api/palplus/webhook
      https://<your-domain>/api/nowpayments/webhook
-  5. Visit /api/config-status to confirm the gateways report "configured".
-  6. In the admin console, check Integrations and Stock & Credentials.
+  6. Visit /api/config-status to confirm the gateways report "configured".
+  7. In the admin console, check Integrations and Stock & Credentials.
 `);
 }
 

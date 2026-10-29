@@ -220,7 +220,7 @@ try {
   git(
     [
       "-c",
-      "user.name=Digital Hub Shop deploy",
+      "user.name=Outlawz Store deploy",
       "-c",
       "user.email=deploy@localhost",
       "commit",

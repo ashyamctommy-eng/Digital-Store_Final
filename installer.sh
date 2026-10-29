@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Interactive, secret-safe bootstrap for a fresh Digital Hub Shop deployment.
+# Interactive, secret-safe bootstrap for a fresh Outlawz Store deployment.
 set -euo pipefail
 umask 077
 
@@ -496,7 +496,7 @@ printf '%s' "$ADMIN_PASSWORD" | php -r '
           . "$" . "config = require __DIR__ . \"/config.sample.php\";\n"
           . "$" . "config[\"mode\"] = " . var_export($mode, true) . ";\n"
           . "$" . "config[\"public_base_url\"] = " . var_export(rtrim($publicBaseUrl, "/"), true) . ";\n"
-          . "$" . "config[\"resend\"][\"from\"] = " . var_export("Digital Hub Shop <orders@" . preg_replace("/^www\\./i", "", (string) parse_url($publicBaseUrl, PHP_URL_HOST)) . ">", true) . ";\n"
+          . "$" . "config[\"resend\"][\"from\"] = " . var_export("Outlawz Store <orders@" . preg_replace("/^www\\./i", "", (string) parse_url($publicBaseUrl, PHP_URL_HOST)) . ">", true) . ";\n"
           . "$" . "config[\"data_dir\"] = " . var_export($dataDir, true) . ";\n"
           . "return $" . "config;\n";
       if (file_put_contents($configTmp, $configCode, LOCK_EX) === false) {

@@ -5,7 +5,7 @@ money. Follow it in order; each step ends with something you can check.
 
 Uploading is the lower-risk of the two deployment routes: it never deletes
 anything, so your order ledger and saved credentials cannot be swept away by a
-deploy. (Git deployment is covered in `DEPLOY.md`.)
+deploy. Git-based VPS deployment is covered in `DEPLOY-VPS.md`.
 
 ---
 

@@ -22,7 +22,7 @@ export default function FloatingButtons() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
-  const waMessage = encodeURIComponent("Hi! I need help with an order on Digital Hub Shop.");
+  const waMessage = encodeURIComponent("Hi! I need help with an order on Outlawz Store.");
 
   return (
     <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2.5">

@@ -6,9 +6,9 @@
 
 export const BRAND = {
   /** Rendered as two spans so the second part can carry the accent colour. */
-  nameLead: "DIGITAL",
-  nameAccent: "HUB SHOP",
-  fullName: "Digital Hub Shop",
+  nameLead: "OUTLAWZ",
+  nameAccent: "STORE",
+  fullName: "Outlawz Store",
   tagline: "Instant delivery of accounts, verifications, VPNs & proxies.",
 } as const;
 

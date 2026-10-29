@@ -22,6 +22,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://outlawz.tech"),
   title: {
     default: `${BRAND.fullName} — Accounts, Verifications, VPNs & Proxies`,
     template: `%s | ${BRAND.fullName}`,

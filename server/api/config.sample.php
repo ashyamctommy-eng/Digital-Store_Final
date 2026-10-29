@@ -147,7 +147,7 @@ return [
     // ---------------------------------------------------------------
     'resend' => [
         'api_key' => '',
-        'from' => 'Digital Hub Shop <orders@your-domain.example>',
+        'from' => 'Outlawz Store <orders@your-domain.example>',
         'reply_to' => '',
         'enabled' => true,
     ],
@@ -163,7 +163,7 @@ return [
     // Operational settings
     // ---------------------------------------------------------------
     // Shown in emails and order exports.
-    'store_name' => 'Digital Hub Shop',
+    'store_name' => 'Outlawz Store',
 
     // When true, product stock on the storefront is driven by
     // COUNT(available inventory) instead of the static catalog number.

@@ -1,11 +1,11 @@
-# Digital Hub Shop
+# Outlawz Store
 
 A mobile-first **digital products marketplace** — social media accounts, SMS
 verifications, premium VPN subscriptions and proxies — with instant delivery,
 dual-currency pricing and M-Pesa + crypto checkout.
 
 Next.js (App Router) + TypeScript + Tailwind CSS 4, exported as a static site
-and deployed to cPanel/HostNin behind a small PHP payment API.
+and deployed to `outlawz.tech` behind a small PHP payment API.
 
 ---
 
@@ -22,11 +22,11 @@ npm run test:php       # backend tests (needs a PHP CLI on PATH, 8.2+)
 npm run verify         # typecheck + lint + backend tests + cPanel build
 ```
 
-For a VPS installation using Nginx + PHP-FPM, see [DEPLOY-VPS.md](DEPLOY-VPS.md).
-For deployment setup, upload the release and run `bash installer.sh` from the
-server document root. It asks for the domain and admin login, then fills in
-production defaults. On a Debian/Ubuntu VPS it also configures Nginx and HTTPS;
-see [DEPLOY.md](DEPLOY.md) or [DEPLOY-VPS.md](DEPLOY-VPS.md) for steps.
+For Outlawz Store's VPS deployment, follow [DEPLOY-VPS.md](DEPLOY-VPS.md).
+It starts by cloning this repository, building the release on the VPS, and
+running `installer.sh` for `outlawz.tech`; Debian/Ubuntu VPS installs also
+configure Nginx and HTTPS. For cPanel/Hostinger uploads, see
+[DEPLOY.md](DEPLOY.md).
 
 ---
 
@@ -114,7 +114,8 @@ customer is redirected to `invoice_url`. Settlement arrives by IPN.
 ## 3. cPanel / HostNin deployment
 
 `npm run build:cpanel` produces `dist/` — upload its **contents** to
-`public_html/`.
+`public_html/` for shared hosting. VPS deployment steps, including Git clone and
+updates that preserve server config, are in [DEPLOY-VPS.md](DEPLOY-VPS.md).
 
 ```
 dist/
@@ -125,13 +126,10 @@ dist/
   .htaccess         HTTPS, caching, security, webhook rules
 ```
 
-Then, on the server:
+Then, on the shared host:
 
-1. On a Debian/Ubuntu VPS, point DNS to the server, then run
-   `sudo bash installer.sh` from the document root. Enter the domain and admin login;
-   production URL, live mode, private storage, PHP-FPM, Nginx, and HTTPS are
-   configured automatically. Use `--sandbox` for test payments.
-   On shared hosting, use `bash installer.sh --app-only`.
+1. Run `bash installer.sh --app-only` from the document root. Enter the domain
+   and admin login; URL, private storage, and sender defaults are configured.
 2. Sign in at `/admin` and add Palplus, NOWPayments, and other provider settings
    in Configurations.
 3. Point the Palplus channel callback and the NOWPayments IPN at
